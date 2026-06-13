@@ -13,6 +13,10 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <!-- Real OCR provider. Use the latest stable from nuget.org if this pin is unavailable. -->
     <PackageReference Include="Google.Cloud.DocumentAI.V1" Version="3.25.0" />
+    <!-- Offline OCR fallback (libtesseract wrapper, Apache-2.0). -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+    <!-- Managed image preprocessing. Pinned to the 2.1.x line (Apache-2.0); v3+ is the Six Labors Split License. -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
   </ItemGroup>
 
 </Project>

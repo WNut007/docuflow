@@ -26,6 +26,11 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 // ---- Domain services ------------------------------------------------------
 // Select OCR provider via config "Ocr:Provider" (Tesseract | GoogleDocAi).
 builder.Services.Configure<GoogleDocAiOptions>(builder.Configuration.GetSection("Ocr:GoogleDocAi"));
+builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("Ocr:Tesseract"));
+
+// Shared, stateless OCR helpers (pure normalization + managed image preprocessing).
+builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
+builder.Services.AddSingleton<ImagePreprocessor>();
 
 var ocrProvider = builder.Configuration["Ocr:Provider"] ?? "Tesseract";
 if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase))

@@ -138,6 +138,7 @@ CREATE TABLE dbo.OcrTextBlock (
     PageNumber   INT                  NOT NULL,
     BlockType    VARCHAR(20)          NOT NULL,    -- LINE, PARAGRAPH, KEY, VALUE, WORD
     Content      NVARCHAR(MAX)        NOT NULL,
+    NormalizedContent NVARCHAR(MAX)   NULL,        -- normalized value (Thai digits/number/date); see 04_normalized_content.sql
     Confidence   DECIMAL(5,4)         NULL,
     -- normalized bounding box (0..1) so it survives page resizing
     BBoxLeft     DECIMAL(7,6)         NULL,
@@ -180,6 +181,7 @@ CREATE TABLE dbo.OcrTableCell (
     ColSpan        INT                  NOT NULL CONSTRAINT DF_Cell_ColSpan DEFAULT(1),
     IsHeader       BIT                  NOT NULL CONSTRAINT DF_Cell_Header DEFAULT(0),
     Content        NVARCHAR(MAX)        NULL,
+    NormalizedContent NVARCHAR(MAX)     NULL,        -- normalized value; see 04_normalized_content.sql
     Confidence     DECIMAL(5,4)         NULL,
     CONSTRAINT FK_OcrTableCell_Table FOREIGN KEY (OcrTableId) REFERENCES dbo.OcrTable(OcrTableId),
     CONSTRAINT UQ_OcrTableCell UNIQUE (OcrTableId, RowIndex, ColIndex)

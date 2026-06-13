@@ -45,6 +45,7 @@ public sealed class OcrTextBlock
     public int PageNumber { get; set; }
     public string BlockType { get; set; } = "LINE";   // LINE/PARAGRAPH/KEY/VALUE/WORD
     public string Content { get; set; } = "";
+    public string? NormalizedContent { get; set; }     // normalized form (Thai digits/number/date); null when same as Content
     public decimal? Confidence { get; set; }
     public decimal? BBoxLeft { get; set; }
     public decimal? BBoxTop { get; set; }
@@ -75,6 +76,7 @@ public sealed class OcrTableCell
     public int ColSpan { get; set; } = 1;
     public bool IsHeader { get; set; }
     public string? Content { get; set; }
+    public string? NormalizedContent { get; set; }     // normalized form; null when same as Content
     public decimal? Confidence { get; set; }
 }
 

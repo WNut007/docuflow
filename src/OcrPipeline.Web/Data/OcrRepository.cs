@@ -21,17 +21,17 @@ public sealed class OcrRepository(SqlConnectionFactory factory)
 
         const string blockSql = """
             INSERT dbo.OcrTextBlock
-                (OcrRunId, PageNumber, BlockType, Content, Confidence,
+                (OcrRunId, PageNumber, BlockType, Content, NormalizedContent, Confidence,
                  BBoxLeft, BBoxTop, BBoxWidth, BBoxHeight)
             VALUES
-                (@OcrRunId, @PageNumber, @BlockType, @Content, @Confidence,
+                (@OcrRunId, @PageNumber, @BlockType, @Content, @NormalizedContent, @Confidence,
                  @BBoxLeft, @BBoxTop, @BBoxWidth, @BBoxHeight);
             """;
         foreach (var b in ex.TextBlocks)
         {
             db.Execute(blockSql, new
             {
-                OcrRunId = runId, b.PageNumber, b.BlockType, b.Content, b.Confidence,
+                OcrRunId = runId, b.PageNumber, b.BlockType, b.Content, b.NormalizedContent, b.Confidence,
                 b.BBoxLeft, b.BBoxTop, b.BBoxWidth, b.BBoxHeight
             }, tx);
         }
@@ -43,9 +43,9 @@ public sealed class OcrRepository(SqlConnectionFactory factory)
             """;
         const string cellSql = """
             INSERT dbo.OcrTableCell
-                (OcrTableId, RowIndex, ColIndex, RowSpan, ColSpan, IsHeader, Content, Confidence)
+                (OcrTableId, RowIndex, ColIndex, RowSpan, ColSpan, IsHeader, Content, NormalizedContent, Confidence)
             VALUES
-                (@OcrTableId, @RowIndex, @ColIndex, @RowSpan, @ColSpan, @IsHeader, @Content, @Confidence);
+                (@OcrTableId, @RowIndex, @ColIndex, @RowSpan, @ColSpan, @IsHeader, @Content, @NormalizedContent, @Confidence);
             """;
         foreach (var t in ex.Tables)
         {
@@ -59,7 +59,7 @@ public sealed class OcrRepository(SqlConnectionFactory factory)
                 db.Execute(cellSql, new
                 {
                     OcrTableId = tableId, c.RowIndex, c.ColIndex, c.RowSpan, c.ColSpan,
-                    c.IsHeader, c.Content, c.Confidence
+                    c.IsHeader, c.Content, c.NormalizedContent, c.Confidence
                 }, tx);
             }
         }

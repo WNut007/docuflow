@@ -4,6 +4,7 @@ using Google.Cloud.DocumentAI.V1;
 using Google.Protobuf;
 using Microsoft.Extensions.Options;
 using OcrPipeline.Web.Domain;
+using OcrPipeline.Web.Services.Normalization;
 // 'Document' is ambiguous between our Domain POCO and the Document AI proto; alias the proto.
 using GcpDocument = Google.Cloud.DocumentAI.V1.Document;
 
@@ -20,7 +21,9 @@ namespace OcrPipeline.Web.Services.Ocr;
 ///
 /// NuGet: Google.Cloud.DocumentAI.V1
 /// </summary>
-public sealed class GoogleDocumentAiEngine(IOptions<GoogleDocAiOptions> options) : IOcrEngine
+public sealed class GoogleDocumentAiEngine(
+    IOptions<GoogleDocAiOptions> options,
+    TextNormalizer normalizer) : IOcrEngine
 {
     private readonly GoogleDocAiOptions _o = options.Value;
 
@@ -51,6 +54,13 @@ public sealed class GoogleDocumentAiEngine(IOptions<GoogleDocAiOptions> options)
         };
 
         var response = await client.ProcessDocumentAsync(request, ct);
+
+        // Online ProcessDocument has a per-request page limit; larger files need batch via GCS.
+        if (response.Document.Pages.Count > _o.OnlinePageLimit)
+            throw new NotSupportedException(
+                $"Document has {response.Document.Pages.Count} pages, over the online limit of {_o.OnlinePageLimit}. " +
+                "Batch processing via Google Cloud Storage is added in Prompt 7.");
+
         return Map(response.Document);
     }
 
@@ -126,6 +136,13 @@ public sealed class GoogleDocumentAiEngine(IOptions<GoogleDocAiOptions> options)
                 ex.Tables.Add(table);
             }
         }
+
+        // normalize every block + cell (Thai digits / currency / Buddhist-era dates), storing raw + normalized
+        var order = normalizer.InferDayMonthOrder(ex.TextBlocks.Select(b => b.Content));
+        foreach (var b in ex.TextBlocks)
+            b.NormalizedContent = normalizer.Normalize(b.Content, order).Normalized;
+        foreach (var cell in ex.Tables.SelectMany(t => t.Cells))
+            cell.NormalizedContent = normalizer.Normalize(cell.Content, order).Normalized;
 
         // optionally keep the raw proto as JSON for audit
         ex.RawJson = doc.ToString();

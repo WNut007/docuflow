@@ -1,0 +1,163 @@
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Metadata;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+
+namespace OcrPipeline.Web.Services.Ocr;
+
+/// <summary>
+/// Lightweight, managed-only image preprocessing applied before Tesseract:
+/// grayscale -> ensure >= target DPI -> deskew (projection-profile) -> median denoise.
+/// Separated from the engine and built from pure, unit-testable static steps.
+///
+/// UPGRADE PATH: for production-grade deskew/denoise (Hough/bilateral/adaptive
+/// threshold) swap these steps for OpenCV (OpenCvSharp/Emgu). Kept dependency-free
+/// here so the project restores and runs without native CV binaries.
+/// </summary>
+public sealed class ImagePreprocessor
+{
+    /// <summary>
+    /// Preprocesses <paramref name="inputPath"/> and writes a PNG to <paramref name="outputPath"/>.
+    /// </summary>
+    public void Process(string inputPath, string outputPath, int targetDpi = 300)
+    {
+        using var image = Image.Load<Rgba32>(inputPath);
+
+        // 1) grayscale
+        image.Mutate(c => c.Grayscale());
+
+        // 2) ensure >= target DPI (upscale pixels when the stored density is too low)
+        EnsureDpi(image, targetDpi);
+
+        // 3) deskew using a projection-profile angle estimate
+        var gray = ToLuminance(image, out int w, out int h);
+        double angle = EstimateSkewAngleDegrees(gray, w, h);
+        if (Math.Abs(angle) >= 0.5)
+        {
+            image.Mutate(c => c.Rotate((float)-angle).BackgroundColor(Color.White));
+            gray = ToLuminance(image, out w, out h);
+        }
+
+        // 4) median denoise (3x3), then write back as L8
+        var denoised = Median3x3(gray, w, h);
+        using var output = Image.LoadPixelData<L8>(denoised, w, h);
+        CopyResolution(image.Metadata, output.Metadata);
+        output.SaveAsPng(outputPath);
+    }
+
+    // ---- DPI ------------------------------------------------------------------
+    private static void EnsureDpi(Image image, int targetDpi)
+    {
+        var md = image.Metadata;
+        double current = md.ResolutionUnits == PixelResolutionUnit.PixelsPerInch
+            ? md.HorizontalResolution
+            : md.HorizontalResolution * 2.54; // PixelsPerCentimeter -> per inch
+
+        if (current >= 1 && current < targetDpi)
+        {
+            double scale = targetDpi / current;
+            int nw = Math.Max(1, (int)Math.Round(image.Width * scale));
+            int nh = Math.Max(1, (int)Math.Round(image.Height * scale));
+            image.Mutate(c => c.Resize(nw, nh));
+        }
+
+        md.ResolutionUnits = PixelResolutionUnit.PixelsPerInch;
+        md.HorizontalResolution = targetDpi;
+        md.VerticalResolution = targetDpi;
+    }
+
+    private static void CopyResolution(ImageMetadata from, ImageMetadata to)
+    {
+        to.ResolutionUnits = from.ResolutionUnits;
+        to.HorizontalResolution = from.HorizontalResolution;
+        to.VerticalResolution = from.VerticalResolution;
+    }
+
+    // ---- pure pixel helpers (unit-testable) -----------------------------------
+
+    /// <summary>Extracts an 8-bit luminance buffer from an image.</summary>
+    private static byte[] ToLuminance(Image<Rgba32> image, out int width, out int height)
+    {
+        width = image.Width;
+        height = image.Height;
+        using var l8 = image.CloneAs<L8>();
+        var px = new L8[width * height];
+        l8.CopyPixelDataTo(px);
+        var buf = new byte[px.Length];
+        for (int i = 0; i < px.Length; i++) buf[i] = px[i].PackedValue;
+        return buf;
+    }
+
+    /// <summary>
+    /// Estimates document skew in degrees via a projection-profile score: rows of a
+    /// well-aligned page have high variance in their dark-pixel counts. Pure function.
+    /// </summary>
+    public static double EstimateSkewAngleDegrees(byte[] luma, int width, int height,
+        double maxAngle = 5.0, double step = 0.5)
+    {
+        if (width <= 1 || height <= 1) return 0;
+
+        // binarize (dark = ink) at a fixed mid threshold; downsample wide pages for speed
+        int stride = Math.Max(1, width / 600);
+        int bw = (width + stride - 1) / stride;
+        int bh = (height + stride - 1) / stride;
+        var dark = new bool[bw * bh];
+        for (int y = 0, by = 0; y < height; y += stride, by++)
+            for (int x = 0, bx = 0; x < width; x += stride, bx++)
+                dark[by * bw + bx] = luma[y * width + x] < 128;
+
+        double bestAngle = 0, bestScore = -1;
+        for (double a = -maxAngle; a <= maxAngle + 1e-9; a += step)
+        {
+            double score = ProfileScore(dark, bw, bh, a);
+            if (score > bestScore) { bestScore = score; bestAngle = a; }
+        }
+        return bestAngle;
+    }
+
+    /// <summary>Variance of per-row ink counts after shearing the binary grid by <paramref name="angleDeg"/>.</summary>
+    private static double ProfileScore(bool[] dark, int w, int h, double angleDeg)
+    {
+        double tan = Math.Tan(angleDeg * Math.PI / 180.0);
+        var rowCounts = new int[h];
+        for (int y = 0; y < h; y++)
+        {
+            int shift = (int)Math.Round((y - h / 2.0) * tan);
+            int count = 0;
+            for (int x = 0; x < w; x++)
+            {
+                int sx = x + shift;
+                if (sx >= 0 && sx < w && dark[y * w + x]) count++;
+            }
+            rowCounts[y] = count;
+        }
+
+        double mean = 0;
+        for (int y = 0; y < h; y++) mean += rowCounts[y];
+        mean /= h;
+        double variance = 0;
+        for (int y = 0; y < h; y++) { double d = rowCounts[y] - mean; variance += d * d; }
+        return variance / h;
+    }
+
+    /// <summary>3x3 median filter over an 8-bit buffer (edge pixels copied through). Pure function.</summary>
+    public static byte[] Median3x3(byte[] src, int width, int height)
+    {
+        var dst = new byte[src.Length];
+        Array.Copy(src, dst, src.Length);
+        var window = new byte[9];
+        for (int y = 1; y < height - 1; y++)
+        {
+            for (int x = 1; x < width - 1; x++)
+            {
+                int k = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                        window[k++] = src[(y + dy) * width + (x + dx)];
+                Array.Sort(window);
+                dst[y * width + x] = window[4]; // median of 9
+            }
+        }
+        return dst;
+    }
+}
