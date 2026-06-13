@@ -15,7 +15,7 @@ var connectionString = builder.Configuration.GetConnectionString("Default")
 // ---- Data access (Dapper over a single connection factory) ----------------
 builder.Services.AddSingleton(new SqlConnectionFactory(connectionString));
 builder.Services.AddScoped<UserRepository>();
-builder.Services.AddScoped<DocumentRepository>();
+builder.Services.AddScoped<IDocumentRepository, DocumentRepository>();
 builder.Services.AddScoped<OcrRepository>();
 builder.Services.AddScoped<MappingRepository>();
 builder.Services.AddScoped<ProcessorRepository>();
@@ -31,6 +31,7 @@ builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("O
 // Shared, stateless OCR helpers (pure normalization + managed image preprocessing).
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
 builder.Services.AddSingleton<ImagePreprocessor>();
+builder.Services.AddSingleton<OcrPipeline.Web.Services.Imaging.PagePreviewRenderer>();
 
 var ocrProvider = builder.Configuration["Ocr:Provider"] ?? "Tesseract";
 if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase))
@@ -84,6 +85,7 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapControllers(); // attribute-routed API controllers (api/documents/...)
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Documents}/{action=Index}/{id?}");

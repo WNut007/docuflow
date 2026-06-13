@@ -27,6 +27,15 @@ public sealed class Document
     public DateTime CreatedAtUtc { get; set; }
 }
 
+public sealed class DocumentPage
+{
+    public long PageId { get; set; }
+    public long DocumentId { get; set; }
+    public int PageNumber { get; set; }
+    public int? WidthPx { get; set; }
+    public int? HeightPx { get; set; }
+}
+
 public sealed class OcrRun
 {
     public long OcrRunId { get; set; }
@@ -105,6 +114,21 @@ public sealed class MappingField
     public string? RowSelector { get; set; }            // FIRST/LAST/ALL
     public string? DefaultValue { get; set; }
     public decimal MinConfidence { get; set; } = 0.60m;
+}
+
+/// <summary>
+/// A sub-column of a TABLE_CELL mapping field (e.g. line_item -> description/qty/unit_price/amount).
+/// Each maps an OCR table column (matched by TableHeader) to a sub-property with its own DataType.
+/// </summary>
+public sealed class MappingTableColumn
+{
+    public int ColumnId { get; set; }
+    public int FieldId { get; set; }
+    public string TargetSubProperty { get; set; } = "";
+    public string DataType { get; set; } = "STRING";   // STRING/DECIMAL/DATE/INT/BOOL
+    public string? TableHeader { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
 }
 
 /// <summary>Engine output container — what an OCR provider returns.</summary>

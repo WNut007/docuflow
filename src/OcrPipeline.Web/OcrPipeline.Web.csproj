@@ -17,6 +17,8 @@
     <PackageReference Include="Tesseract" Version="5.2.0" />
     <!-- Managed image preprocessing. Pinned to the 2.1.x line (Apache-2.0); v3+ is the Six Labors Split License. -->
     <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
+    <!-- PDF page rasterization (PDFium, MIT). Rendered through ImageSharp for PNG previews. -->
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
   </ItemGroup>
 
 </Project>

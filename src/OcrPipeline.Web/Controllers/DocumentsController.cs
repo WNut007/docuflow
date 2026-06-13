@@ -5,15 +5,17 @@ using OcrPipeline.Web.Data;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
 using OcrPipeline.Web.Services;
+using OcrPipeline.Web.Services.Imaging;
 
 namespace OcrPipeline.Web.Controllers;
 
 [Authorize]
 public sealed class DocumentsController(
-    DocumentRepository documents,
+    IDocumentRepository documents,
     OcrRepository ocrRepo,
     MappingRepository mappingRepo,
     PipelineService pipeline,
+    PagePreviewRenderer previewRenderer,
     IConfiguration config) : Controller
 {
     public IActionResult Index()
@@ -60,6 +62,23 @@ public sealed class DocumentsController(
         };
         var docId = documents.Insert(doc);
         documents.LogEvent(docId, "CAPTURE", null, "CAPTURED", "File uploaded", userId);
+
+        // rasterize page previews (PDF -> per-page PNG; image -> single PNG) for the mapping UI
+        try
+        {
+            var dpi = config.GetValue<int?>("Storage:PreviewDpi") ?? 200;
+            var pages = previewRenderer.Render(storedPath, file.ContentType, dpi);
+            documents.InsertPages(docId, pages.Select(p => new DocumentPage
+            {
+                DocumentId = docId, PageNumber = p.PageNumber, WidthPx = p.Width, HeightPx = p.Height
+            }));
+        }
+        catch (Exception ex)
+        {
+            // previews are non-fatal: the pipeline can still extract; UI image just 404s
+            documents.LogEvent(docId, "PREVIEW", "CAPTURED", "CAPTURED",
+                $"Preview rendering failed: {ex.Message}", userId);
+        }
 
         // run the pipeline inline (mockup); in prod this is enqueued
         await pipeline.ProcessAsync(docId, userId, ct);

@@ -227,6 +227,23 @@ CREATE TABLE dbo.MappingField (
 );
 GO
 
+/* Sub-columns for a TABLE_CELL field (e.g. line_item -> description/qty/unit_price/amount).
+   Each row binds an OCR table column (matched by TableHeader) to a sub-property + DataType.
+   Also created idempotently in 05_table_columns.sql for existing databases. */
+CREATE TABLE dbo.MappingTableColumn (
+    ColumnId          INT IDENTITY(1,1)  NOT NULL CONSTRAINT PK_MappingTableColumn PRIMARY KEY,
+    FieldId           INT                NOT NULL,
+    TargetSubProperty NVARCHAR(100)      NOT NULL,   -- e.g. "description", "qty", "unit_price", "amount"
+    DataType          VARCHAR(20)        NOT NULL CONSTRAINT DF_MTC_DataType DEFAULT('STRING'),
+    TableHeader       NVARCHAR(120)      NULL,        -- OCR column header to match
+    SortOrder         INT                NOT NULL CONSTRAINT DF_MTC_Sort DEFAULT(0),
+    IsActive          BIT                NOT NULL CONSTRAINT DF_MTC_Active DEFAULT(1),
+    CONSTRAINT FK_MappingTableColumn_Field FOREIGN KEY (FieldId) REFERENCES dbo.MappingField(FieldId)
+);
+GO
+CREATE INDEX IX_MappingTableColumn_Field ON dbo.MappingTableColumn(FieldId, SortOrder);
+GO
+
 /* Output of running a template against a document */
 CREATE TABLE dbo.MappingResult (
     MappingResultId BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MappingResult PRIMARY KEY,

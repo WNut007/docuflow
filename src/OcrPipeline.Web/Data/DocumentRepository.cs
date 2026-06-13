@@ -3,7 +3,7 @@ using OcrPipeline.Web.Domain;
 
 namespace OcrPipeline.Web.Data;
 
-public sealed class DocumentRepository(SqlConnectionFactory factory)
+public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocumentRepository
 {
     public long Insert(Document doc)
     {
@@ -45,6 +45,38 @@ public sealed class DocumentRepository(SqlConnectionFactory factory)
             ORDER BY CreatedAtUtc DESC;
             """;
         return db.Query<Document>(sql, new { Top = top }).ToList();
+    }
+
+    /// <summary>Persists per-page pixel dimensions and updates the document's page count.</summary>
+    public void InsertPages(long documentId, IEnumerable<DocumentPage> pages)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            INSERT dbo.DocumentPage (DocumentId, PageNumber, WidthPx, HeightPx)
+            VALUES (@DocumentId, @PageNumber, @WidthPx, @HeightPx);
+            """;
+        int count = 0;
+        foreach (var p in pages)
+        {
+            db.Execute(sql, new { DocumentId = documentId, p.PageNumber, p.WidthPx, p.HeightPx });
+            count++;
+        }
+
+        db.Execute(
+            "UPDATE dbo.Document SET PageCount = @PageCount, UpdatedAtUtc = SYSUTCDATETIME() WHERE DocumentId = @DocumentId;",
+            new { DocumentId = documentId, PageCount = count });
+    }
+
+    public IReadOnlyList<DocumentPage> GetPages(long documentId)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT PageId, DocumentId, PageNumber, WidthPx, HeightPx
+            FROM dbo.DocumentPage
+            WHERE DocumentId = @DocumentId
+            ORDER BY PageNumber;
+            """;
+        return db.Query<DocumentPage>(sql, new { DocumentId = documentId }).ToList();
     }
 
     public void SetClassification(long documentId, int documentTypeId, decimal confidence)

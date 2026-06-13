@@ -23,6 +23,53 @@ public sealed class MappingRepository(SqlConnectionFactory factory)
                  .ToDictionary(g => g.Key, g => g.ToList());
     }
 
+    /// <summary>Loads active table sub-columns for every field in a template, keyed by FieldId.</summary>
+    public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int templateId)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT c.ColumnId, c.FieldId, c.TargetSubProperty, c.DataType, c.TableHeader,
+                   c.SortOrder, c.IsActive
+            FROM dbo.MappingTableColumn c
+            JOIN dbo.MappingField f ON f.FieldId = c.FieldId
+            WHERE f.TemplateId = @TemplateId AND c.IsActive = 1
+            ORDER BY c.FieldId, c.SortOrder;
+            """;
+        return db.Query<MappingTableColumn>(sql, new { TemplateId = templateId })
+                 .GroupBy(c => c.FieldId)
+                 .ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    /// <summary>Replaces a field's table sub-columns (delete-then-insert) in one transaction.</summary>
+    public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> columns)
+    {
+        using var db = factory.Create();
+        using var tx = db.BeginTransaction();
+
+        db.Execute("DELETE FROM dbo.MappingTableColumn WHERE FieldId = @FieldId;", new { FieldId = fieldId }, tx);
+
+        const string insertSql = """
+            INSERT dbo.MappingTableColumn (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive)
+            VALUES (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive);
+            """;
+        int order = 0;
+        foreach (var c in columns)
+        {
+            db.Execute(insertSql, new
+            {
+                FieldId = fieldId,
+                c.TargetSubProperty,
+                c.DataType,
+                c.TableHeader,
+                SortOrder = c.SortOrder == 0 ? order : c.SortOrder,
+                c.IsActive
+            }, tx);
+            order++;
+        }
+
+        tx.Commit();
+    }
+
     public MappingTemplate? GetActiveTemplateForType(int documentTypeId)
     {
         using var db = factory.Create();
