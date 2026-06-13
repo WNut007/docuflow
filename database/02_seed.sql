@@ -50,7 +50,7 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AppUser WHERE Email = N'admin@local')
 BEGIN
     INSERT dbo.AppUser (UserName, Email, PasswordHash, DisplayName)
     VALUES (N'admin', N'admin@local',
-            N'100000.S5le5Vjl50KJWMUcw34nUg==.DFOuceFreRGserbt+c9H8yAQWkqXUQff6JjskfymbF8=',
+            N'100000.yKPuznA3H+kDegRgnRak1g==.9feQpMBgPeoKrjveDmqwrJKSpBjrvTXqZs+vOfE1vCM=',
             N'Administrator');
 
     DECLARE @uid INT = SCOPE_IDENTITY();

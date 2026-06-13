@@ -97,3 +97,36 @@ NuGet: `Google.Cloud.DocumentAI.V1` — verify the version pin against nuget.org
 - New entities → add POCO in `Domain`, repository in `Data`, register in `Program.cs`.
 - Prefer small, focused files; match existing C# 12 style (primary constructors, file-scoped namespaces).
 - Don't introduce EF Core, raw string-concatenated SQL, or FLOAT for money.
+
+## OCR languages & accuracy (HARD REQUIREMENTS — do not regress)
+- Must OCR **Thai and English** in the same document.
+- Primary engine: **Google Document AI** (supports Thai) for production accuracy.
+  Offline fallback: **Tesseract with `tha+eng`** (lower accuracy on Thai, weak on tables).
+- Preprocess images before Tesseract: grayscale, ensure >=300 DPI, deskew, denoise.
+- Normalization layer (used by all engines) — store BOTH raw and normalized:
+  - Thai digits ๐-๙ -> 0-9
+  - numbers/currency -> decimal (strip thousands separators)
+  - dates support `dd/MM/yyyy` and Buddhist era (พ.ศ.) -> Gregorian; infer day/month order per document
+- Capture per-field confidence; flag values below `Ocr:MinPageConfidence` for human review.
+
+## Sample test document (ground truth)
+`samples/east-repair-invoice.png` — pipeline must extract & map to:
+- invoice_id `US-001`
+- invoice_date `2019-02-11`  (format is dd/MM/yyyy — Due Date `26/02/2019` proves day-first)
+- po_number `2312/2019`
+- due_date `2019-02-26`
+- subtotal `145.00`, sales_tax `9.06`, total `154.06`
+- line_item (3 rows):
+  1) Front and rear brake cables · qty 1 · unit 100.00 · amount 100.00
+  2) New set of pedal arms · qty 2 · unit 15.00 · amount 30.00
+  3) Labor 3hrs · qty 3 · unit 5.00 · amount 15.00
+
+## Point-and-click mapping (target UX — for non-technical users)
+LEFT = page image with clickable OCR bounding boxes (hover shows the text).
+RIGHT = field list with tabs (Fields / Key-value / Tables / OCR), document-type selector,
+filter, "New field" button; `line_item` is a table field shown expanded with sub-fields
+(description, qty, unit_price, amount).
+Flow: user selects a field on the right, then clicks its box on the document to bind it.
+Infer source type from the block type (KEY/VALUE -> KEY_VALUE, table cell -> TABLE_CELL /
+MappingTableColumn). **Never show regex or patterns to the user.** Show raw + normalized value.
+Save bindings to `MappingField` and `MappingTableColumn`.
