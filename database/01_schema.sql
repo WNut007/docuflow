@@ -183,6 +183,11 @@ CREATE TABLE dbo.OcrTableCell (
     Content        NVARCHAR(MAX)        NULL,
     NormalizedContent NVARCHAR(MAX)     NULL,        -- normalized value; see 04_normalized_content.sql
     Confidence     DECIMAL(5,4)         NULL,
+    -- normalized (0..1) bounding box for on-image click-to-bind; see 06_table_cell_bbox.sql
+    BBoxLeft       DECIMAL(7,6)         NULL,
+    BBoxTop        DECIMAL(7,6)         NULL,
+    BBoxWidth      DECIMAL(7,6)         NULL,
+    BBoxHeight     DECIMAL(7,6)         NULL,
     CONSTRAINT FK_OcrTableCell_Table FOREIGN KEY (OcrTableId) REFERENCES dbo.OcrTable(OcrTableId),
     CONSTRAINT UQ_OcrTableCell UNIQUE (OcrTableId, RowIndex, ColIndex)
 );

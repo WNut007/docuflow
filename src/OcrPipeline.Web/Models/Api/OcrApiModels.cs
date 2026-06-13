@@ -11,10 +11,10 @@ public sealed record OcrBlockDto(
     string Id, int Page, string Type, string Text, string? NormalizedValue,
     decimal? Confidence, BBoxDto? Bbox);
 
-/// <summary>One table cell; Type is always "TABLE_CELL".</summary>
+/// <summary>One table cell; Type is always "TABLE_CELL". Bbox is null when the engine has no cell geometry.</summary>
 public sealed record OcrCellDto(
     int RowIndex, int ColIndex, int RowSpan, int ColSpan, bool IsHeader,
-    string Type, string? Text, string? NormalizedValue, decimal? Confidence);
+    string Type, string? Text, string? NormalizedValue, decimal? Confidence, BBoxDto? Bbox);
 
 /// <summary>A detected table and its cell grid.</summary>
 public sealed record OcrTableDto(

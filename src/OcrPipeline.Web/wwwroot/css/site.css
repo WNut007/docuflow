@@ -2,3 +2,19 @@
 .card { border-radius: var(--ocr-radius); }
 .navbar-brand i { color: #6ea8fe; }
 .table > :not(caption) > * > * { vertical-align: middle; }
+
+/* Visual mapping (Prompt 4) */
+.visual-stage { position: relative; display: inline-block; max-width: 100%; }
+.visual-stage img { max-width: 100%; height: auto; display: block; }
+.visual-overlay { position: absolute; inset: 0; }
+.vm-box { position: absolute; border: 2px solid rgba(13,110,253,.55); background: rgba(13,110,253,.08);
+          border-radius: 3px; cursor: pointer; }
+.vm-box:hover { background: rgba(13,110,253,.22); border-color: rgba(13,110,253,.9); }
+.vm-box-value { border-color: rgba(25,135,84,.6); background: rgba(25,135,84,.08); }
+.vm-box-key { border-color: rgba(255,193,7,.7); background: rgba(255,193,7,.10); }
+.vm-pane .list-group-item { border: 1px solid var(--bs-border-color); margin-bottom: -1px; }
+.vm-field.vm-armed { outline: 2px solid var(--bs-warning); }
+.vm-armed-sub { background: rgba(255,193,7,.12); border-radius: .3rem; }
+.vm-cell { border-color: rgba(111,66,193,.55); background: rgba(111,66,193,.07); }
+.vm-cell:hover { background: rgba(111,66,193,.20); border-color: rgba(111,66,193,.9); }
+.vm-cell-header { border-style: dashed; border-color: rgba(111,66,193,.85); }

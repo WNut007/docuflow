@@ -1,14 +1,16 @@
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OcrPipeline.Web.Data;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
+using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Transform;
 
 namespace OcrPipeline.Web.Controllers;
 
 [Authorize]
-public sealed class MappingController(MappingRepository mapping) : Controller
+public sealed class MappingController(MappingRepository mapping, IDocumentRepository documents) : Controller
 {
     public IActionResult Index()
         => View(mapping.GetAllTemplates());
@@ -79,6 +81,136 @@ public sealed class MappingController(MappingRepository mapping) : Controller
         mapping.SaveFields(vm.TemplateId, fields, stepsByRow);
         TempData["Saved"] = $"Saved {fields.Count} field mapping(s).";
         return RedirectToAction(nameof(Edit), new { id = vm.TemplateId });
+    }
+
+    // ---- Point-and-click mapping (Prompt 4) -------------------------------
+
+    [HttpGet]
+    public IActionResult Visual(int templateId, long? documentId)
+    {
+        var tpl = mapping.GetTemplateById(templateId);
+        if (tpl is null) return NotFound();
+
+        var columns = mapping.GetTableColumns(templateId);
+        var docs = documents.GetByTypeWithPreviews(tpl.DocumentTypeId);
+        long? docId = documentId ?? docs.FirstOrDefault()?.DocumentId;
+        int pageCount = docs.FirstOrDefault(d => d.DocumentId == docId)?.PageCount ?? 0;
+
+        var templateOptions = mapping.GetAllTemplates()
+            .Where(t => t.tpl.IsActive)
+            .Select(t => new TemplateOption(t.tpl.TemplateId, $"{t.docType} — {t.tpl.Name}", t.tpl.TemplateId == templateId))
+            .ToList();
+
+        var vm = new VisualMappingViewModel
+        {
+            TemplateId = tpl.TemplateId,
+            Name = tpl.Name,
+            TargetModel = tpl.TargetModel,
+            DocumentTypeId = tpl.DocumentTypeId,
+            DocumentId = docId,
+            PageCount = pageCount,
+            TemplateOptions = templateOptions,
+            Documents = docs.Select(d => new DocumentOption(d.DocumentId, d.FileName, d.PageCount)).ToList(),
+            Fields = tpl.Fields.Select(f => new VisualFieldModel
+            {
+                FieldId = f.FieldId,
+                TargetProperty = f.TargetProperty,
+                DataType = f.DataType,
+                IsRequired = f.IsRequired,
+                SourceType = f.SourceType,
+                TableHeader = f.TableHeader,
+                RowSelector = f.RowSelector,
+                DefaultValue = f.DefaultValue,
+                MinConfidence = f.MinConfidence,
+                BindingLabel = BindingLabel(f),
+                SubColumns = (columns.GetValueOrDefault(f.FieldId) ?? new List<MappingTableColumn>())
+                    .Select(c => new VisualSubColumnModel
+                    {
+                        ColumnId = c.ColumnId,
+                        TargetSubProperty = c.TargetSubProperty,
+                        DataType = c.DataType,
+                        TableHeader = c.TableHeader,
+                        SortOrder = c.SortOrder
+                    }).ToList()
+            }).ToList()
+        };
+        return View(vm);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult VisualSave([FromBody] VisualSavePayload payload)
+    {
+        if (payload is null || payload.TemplateId <= 0) return BadRequest();
+
+        var rows = payload.Fields.Where(f => !string.IsNullOrWhiteSpace(f.TargetProperty)).ToList();
+
+        var fields = rows.Select(f => new MappingField
+        {
+            FieldId = f.FieldId,
+            TargetProperty = f.TargetProperty.Trim(),
+            DataType = f.DataType,
+            IsRequired = f.IsRequired,
+            SourceType = f.SourceType,
+            // KeyPattern is derived server-side from the clicked key; never user-entered regex
+            KeyPattern = f.SourceType == "KEY_VALUE" && !string.IsNullOrWhiteSpace(f.BindingKey)
+                ? BindingInference.KeyPatternFor(f.BindingKey) : null,
+            SourcePattern = null,
+            TableHeader = Nullify(f.TableHeader),
+            RowSelector = Nullify(f.RowSelector),
+            DefaultValue = Nullify(f.DefaultValue),
+            MinConfidence = f.MinConfidence
+        }).ToList();
+
+        // Preserve each field's existing transformer steps (SaveFields replaces steps wholesale).
+        var existingSteps = mapping.GetTransformerSteps(payload.TemplateId);
+        var stepsByRow = new Dictionary<int, List<TransformerStep>>();
+        for (int i = 0; i < rows.Count; i++)
+            if (rows[i].FieldId > 0 && existingSteps.TryGetValue(rows[i].FieldId, out var st) && st.Count > 0)
+                stepsByRow[i] = st;
+
+        mapping.SaveFields(payload.TemplateId, fields, stepsByRow);
+
+        // Resolve (possibly newly-inserted) FieldIds by target property, then save sub-columns.
+        var saved = mapping.GetTemplateById(payload.TemplateId);
+        var idByProp = saved?.Fields.ToDictionary(f => f.TargetProperty, f => f.FieldId, StringComparer.OrdinalIgnoreCase)
+                       ?? new Dictionary<string, int>();
+
+        foreach (var f in rows.Where(f => f.SubColumns.Count > 0))
+        {
+            if (!idByProp.TryGetValue(f.TargetProperty.Trim(), out var fieldId)) continue;
+            var cols = f.SubColumns
+                .Where(c => !string.IsNullOrWhiteSpace(c.TargetSubProperty))
+                .Select(c => new MappingTableColumn
+                {
+                    FieldId = fieldId,
+                    TargetSubProperty = c.TargetSubProperty.Trim(),
+                    DataType = c.DataType,
+                    TableHeader = Nullify(c.TableHeader),
+                    SortOrder = c.SortOrder,
+                    IsActive = true
+                });
+            mapping.SaveTableColumns(fieldId, cols);
+        }
+
+        return Json(new { ok = true });
+    }
+
+    /// <summary>User-friendly binding summary (never a raw regex).</summary>
+    private static string? BindingLabel(MappingField f) => f.SourceType switch
+    {
+        "KEY_VALUE" => f.KeyPattern is null ? null : UnpatternKey(f.KeyPattern),
+        "TABLE_CELL" => f.TableHeader,
+        "CONSTANT" => f.DefaultValue,
+        _ => null
+    };
+
+    private static string UnpatternKey(string pattern)
+    {
+        var p = pattern;
+        if (p.StartsWith('^')) p = p[1..];
+        if (p.EndsWith('$')) p = p[..^1];
+        try { return Regex.Unescape(p); } catch (RegexParseException) { return p; }
     }
 
     // ---- helpers ----------------------------------------------------------

@@ -71,6 +71,8 @@ builder.Services
 builder.Services.AddAuthorization();
 
 builder.Services.AddControllersWithViews();
+// Allow the visual mapper's fetch() POST to send the antiforgery token via header.
+builder.Services.AddAntiforgery(o => o.HeaderName = "RequestVerificationToken");
 
 var app = builder.Build();
 

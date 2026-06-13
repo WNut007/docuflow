@@ -159,6 +159,8 @@ public sealed class GoogleDocumentAiEngine(
             int colIndex = 0;
             foreach (var cell in row.Cells)
             {
+                // normalized cell geometry when the processor provides it (else null -> Tables-tab fallback)
+                var (l, t, w, h) = BBox(cell.Layout?.BoundingPoly);
                 table.Cells.Add(new OcrTableCell
                 {
                     RowIndex = rowIndex,
@@ -167,7 +169,8 @@ public sealed class GoogleDocumentAiEngine(
                     ColSpan = Math.Max(1, cell.ColSpan),
                     IsHeader = header,
                     Content = GetText(text, cell.Layout?.TextAnchor).Trim(),
-                    Confidence = (decimal?)cell.Layout?.Confidence
+                    Confidence = (decimal?)cell.Layout?.Confidence,
+                    BBoxLeft = l, BBoxTop = t, BBoxWidth = w, BBoxHeight = h
                 });
                 colIndex += Math.Max(1, cell.ColSpan);
             }

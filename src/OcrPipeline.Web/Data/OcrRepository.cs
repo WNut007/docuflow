@@ -43,9 +43,11 @@ public sealed class OcrRepository(SqlConnectionFactory factory)
             """;
         const string cellSql = """
             INSERT dbo.OcrTableCell
-                (OcrTableId, RowIndex, ColIndex, RowSpan, ColSpan, IsHeader, Content, NormalizedContent, Confidence)
+                (OcrTableId, RowIndex, ColIndex, RowSpan, ColSpan, IsHeader, Content, NormalizedContent, Confidence,
+                 BBoxLeft, BBoxTop, BBoxWidth, BBoxHeight)
             VALUES
-                (@OcrTableId, @RowIndex, @ColIndex, @RowSpan, @ColSpan, @IsHeader, @Content, @NormalizedContent, @Confidence);
+                (@OcrTableId, @RowIndex, @ColIndex, @RowSpan, @ColSpan, @IsHeader, @Content, @NormalizedContent, @Confidence,
+                 @BBoxLeft, @BBoxTop, @BBoxWidth, @BBoxHeight);
             """;
         foreach (var t in ex.Tables)
         {
@@ -59,7 +61,8 @@ public sealed class OcrRepository(SqlConnectionFactory factory)
                 db.Execute(cellSql, new
                 {
                     OcrTableId = tableId, c.RowIndex, c.ColIndex, c.RowSpan, c.ColSpan,
-                    c.IsHeader, c.Content, c.NormalizedContent, c.Confidence
+                    c.IsHeader, c.Content, c.NormalizedContent, c.Confidence,
+                    c.BBoxLeft, c.BBoxTop, c.BBoxWidth, c.BBoxHeight
                 }, tx);
             }
         }

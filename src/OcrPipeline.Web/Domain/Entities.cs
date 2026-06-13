@@ -87,6 +87,12 @@ public sealed class OcrTableCell
     public string? Content { get; set; }
     public string? NormalizedContent { get; set; }     // normalized form; null when same as Content
     public decimal? Confidence { get; set; }
+    // normalized (0..1) bounding box so a cell can be clicked on the page image; null when the
+    // engine has no cell geometry (e.g. Tesseract, or a processor returning only pixel vertices)
+    public decimal? BBoxLeft { get; set; }
+    public decimal? BBoxTop { get; set; }
+    public decimal? BBoxWidth { get; set; }
+    public decimal? BBoxHeight { get; set; }
 }
 
 public sealed class MappingTemplate

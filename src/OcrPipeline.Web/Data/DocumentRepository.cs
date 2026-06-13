@@ -47,6 +47,20 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         return db.Query<Document>(sql, new { Top = top }).ToList();
     }
 
+    /// <summary>Documents of a type that already have rendered page previews (for the visual mapper).</summary>
+    public IReadOnlyList<DocumentRef> GetByTypeWithPreviews(int documentTypeId, int top = 20)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT TOP (@Top) d.DocumentId, d.OriginalFileName AS FileName, d.PageCount
+            FROM dbo.Document d
+            WHERE d.DocumentTypeId = @DocumentTypeId
+              AND EXISTS (SELECT 1 FROM dbo.DocumentPage p WHERE p.DocumentId = d.DocumentId)
+            ORDER BY d.CreatedAtUtc DESC;
+            """;
+        return db.Query<DocumentRef>(sql, new { DocumentTypeId = documentTypeId, Top = top }).ToList();
+    }
+
     /// <summary>Persists per-page pixel dimensions and updates the document's page count.</summary>
     public void InsertPages(long documentId, IEnumerable<DocumentPage> pages)
     {

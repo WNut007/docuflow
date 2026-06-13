@@ -27,6 +27,9 @@
                     <td>v@tpl.Version</td>
                     <td>@fieldCount</td>
                     <td class="text-end">
+                        <a class="btn btn-sm btn-outline-success" asp-action="Visual" asp-route-templateId="@tpl.TemplateId">
+                            <i class="bi bi-bounding-box-circles"></i> Map visually
+                        </a>
                         <a class="btn btn-sm btn-outline-primary" asp-action="Edit" asp-route-id="@tpl.TemplateId">
                             <i class="bi bi-diagram-3"></i> Edit mapping
                         </a>

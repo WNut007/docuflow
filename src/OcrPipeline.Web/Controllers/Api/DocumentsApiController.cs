@@ -70,7 +70,7 @@ public sealed class DocumentsApiController(
                 var cells = t.Cells
                     .Select(c => new OcrCellDto(
                         c.RowIndex, c.ColIndex, c.RowSpan, c.ColSpan, c.IsHeader,
-                        "TABLE_CELL", c.Content, c.NormalizedContent, c.Confidence))
+                        "TABLE_CELL", c.Content, c.NormalizedContent, c.Confidence, ToBBox(c)))
                     .ToList();
 
                 tables.Add(new OcrTableDto(
@@ -95,6 +95,11 @@ public sealed class DocumentsApiController(
 
     private static BBoxDto? ToBBox(OcrTextBlock b)
         => b is { BBoxLeft: { } l, BBoxTop: { } t, BBoxWidth: { } w, BBoxHeight: { } h }
+            ? new BBoxDto(l, t, w, h)
+            : null;
+
+    private static BBoxDto? ToBBox(OcrTableCell c)
+        => c is { BBoxLeft: { } l, BBoxTop: { } t, BBoxWidth: { } w, BBoxHeight: { } h }
             ? new BBoxDto(l, t, w, h)
             : null;
 }
