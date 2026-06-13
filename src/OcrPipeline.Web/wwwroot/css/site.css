@@ -1,0 +1,4 @@
+:root { --ocr-radius: .6rem; }
+.card { border-radius: var(--ocr-radius); }
+.navbar-brand i { color: #6ea8fe; }
+.table > :not(caption) > * > * { vertical-align: middle; }

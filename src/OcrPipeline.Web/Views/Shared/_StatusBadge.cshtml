@@ -1,0 +1,17 @@
+@model string
+@{
+    var (cls, icon) = Model switch
+    {
+        "CAPTURED"     => ("secondary",  "inbox"),
+        "CLASSIFIED"   => ("info",       "tag"),
+        "EXTRACTED"    => ("primary",    "file-text"),
+        "ENRICHED"     => ("primary",    "link-45deg"),
+        "VALIDATED"    => ("success",    "check2-circle"),
+        "NEEDS_REVIEW" => ("warning",    "exclamation-triangle"),
+        "MAPPED"       => ("success",    "diagram-3"),
+        "CONSUMED"     => ("dark",       "send"),
+        "FAILED"       => ("danger",     "x-octagon"),
+        _              => ("secondary",  "circle")
+    };
+}
+<span class="badge text-bg-@cls"><i class="bi bi-@icon"></i> @Model</span>

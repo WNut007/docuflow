@@ -1,0 +1,109 @@
+@model TemplateEditViewModel
+@{
+    ViewData["Title"] = "Edit mapping";
+    string[] dataTypes = { "STRING", "DECIMAL", "DATE", "INT", "BOOL" };
+    string[] sourceTypes = { "KEY_VALUE", "REGEX", "TABLE_CELL", "CONSTANT" };
+    string[] rowSelectors = { "", "FIRST", "LAST", "ALL" };
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h3 mb-1"><i class="bi bi-diagram-3"></i> @Model.Name</h1>
+        <div class="text-body-secondary small">Target model: <code>@Model.TargetModel</code></div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" asp-action="Index"><i class="bi bi-arrow-left"></i> Back</a>
+</div>
+
+@if (TempData["Saved"] is string saved)
+{
+    <div class="alert alert-success py-2"><i class="bi bi-check2-circle"></i> @saved</div>
+}
+
+<form method="post" asp-action="Edit">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="TemplateId" />
+    <input type="hidden" asp-for="DocumentTypeId" />
+    <input type="hidden" asp-for="Name" />
+    <input type="hidden" asp-for="TargetModel" />
+
+    @* discovered property keys -> datalist for KEY_VALUE source *@
+    <datalist id="propertyKeys">
+        @foreach (var k in Model.PropertyKeys)
+        {
+            <option value="@k"></option>
+        }
+    </datalist>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Field mappings</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addRow">
+                <i class="bi bi-plus-lg"></i> Add field
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="rows">
+                @for (int i = 0; i < Model.Fields.Count; i++)
+                {
+                    @await Html.PartialAsync("_FieldRow", Model.Fields[i],
+                        new ViewDataDictionary(ViewData) { { "index", i } })
+                }
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between">
+            <span class="text-body-secondary small">
+                Transformer steps: one per line, <code>type|configJson</code> (e.g. <code>number_clean|{ "decimals": 2 }</code>)
+            </span>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save mapping</button>
+        </div>
+    </div>
+</form>
+
+@* hidden template row for "Add field" *@
+<template id="rowTemplate">
+    @await Html.PartialAsync("_FieldRow", new FieldEditModel(),
+        new ViewDataDictionary(ViewData) { { "index", -1 } })
+</template>
+
+@section Scripts {
+<script>
+    (function () {
+        const rows = document.getElementById('rows');
+        const tpl  = document.getElementById('rowTemplate').innerHTML;
+        let nextIndex = @Model.Fields.Count;
+
+        document.getElementById('addRow').addEventListener('click', function () {
+            const html = tpl.replaceAll('__index__', nextIndex);
+            const wrap = document.createElement('div');
+            wrap.innerHTML = html.trim();
+            rows.appendChild(wrap.firstElementChild);
+            nextIndex++;
+        });
+
+        rows.addEventListener('click', function (e) {
+            const btn = e.target.closest('.remove-row');
+            if (btn) btn.closest('.field-row').remove();
+        });
+
+        // show only the inputs relevant to the chosen source type
+        rows.addEventListener('change', function (e) {
+            if (e.target.classList.contains('source-type')) toggleSource(e.target);
+        });
+        document.querySelectorAll('.source-type').forEach(toggleSource);
+
+        function toggleSource(sel) {
+            const row = sel.closest('.field-row');
+            const map = {
+                KEY_VALUE:  ['key'],
+                REGEX:      ['regex'],
+                TABLE_CELL: ['table'],
+                CONSTANT:   ['const']
+            };
+            const show = map[sel.value] || [];
+            row.querySelectorAll('[data-src]').forEach(el => {
+                el.style.display = show.includes(el.dataset.src) ? '' : 'none';
+            });
+        }
+    })();
+</script>
+}

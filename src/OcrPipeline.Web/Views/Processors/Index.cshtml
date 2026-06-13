@@ -1,0 +1,34 @@
+@model IReadOnlyList<Processor>
+@{ ViewData["Title"] = "Processors"; }
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">OCR processors</h1>
+</div>
+<p class="text-body-secondary">Configured OCR service instances. Each binds an engine to its settings (processor id, region, language).</p>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>Name</th><th>Engine</th><th>Mode</th><th>Store raw JSON</th><th>Active</th><th>Config</th></tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="6" class="text-center text-body-secondary py-4">No processors configured.</td></tr>
+            }
+            @foreach (var p in Model)
+            {
+                <tr>
+                    <td class="fw-semibold">@p.Name</td>
+                    <td><span class="badge text-bg-secondary">@p.Engine</span></td>
+                    <td>@(p.ProcessorMode == "QUEUE"
+                          ? Html.Raw("<span class=\"badge text-bg-info\">QUEUE</span>")
+                          : Html.Raw("<span class=\"badge text-bg-success\">REALTIME</span>"))</td>
+                    <td>@(p.StoreRawJson ? "Yes" : "No")</td>
+                    <td>@(p.IsActive ? "Yes" : "No")</td>
+                    <td><code class="small">@p.ConfigJson</code></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

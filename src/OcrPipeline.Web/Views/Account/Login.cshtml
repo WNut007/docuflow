@@ -1,0 +1,32 @@
+@{
+    ViewData["Title"] = "Sign in";
+    Layout = "_Layout";
+}
+<div class="row justify-content-center">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow-sm mt-5">
+            <div class="card-body p-4">
+                <h1 class="h4 mb-3 text-center"><i class="bi bi-shield-lock"></i> Sign in</h1>
+
+                <div asp-validation-summary="All" class="text-danger small mb-2"></div>
+
+                <form method="post" asp-controller="Account" asp-action="Login">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="returnUrl" value="@ViewBag.ReturnUrl" />
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input name="email" class="form-control" value="admin@local" autocomplete="username" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input name="password" type="password" class="form-control" autocomplete="current-password" />
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Sign in</button>
+                </form>
+                <p class="text-body-secondary small mt-3 mb-0 text-center">
+                    Demo: admin@local / Admin@123
+                </p>
+            </div>
+        </div>
+    </div>
+</div>

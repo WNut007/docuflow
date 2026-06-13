@@ -1,0 +1,103 @@
+@model FieldEditModel
+@{
+    int idx = (int)(ViewData["index"] ?? -1);
+    string p = idx < 0 ? "__index__" : idx.ToString();
+    string[] dataTypes = { "STRING", "DECIMAL", "DATE", "INT", "BOOL" };
+    string[] sourceTypes = { "KEY_VALUE", "REGEX", "TABLE_CELL", "CONSTANT" };
+    string[] rowSelectors = { "FIRST", "LAST", "ALL" };
+}
+<div class="field-row border rounded p-3 mb-3">
+    <input type="hidden" name="Fields.Index" value="@p" />
+    <input type="hidden" name="Fields[@p].FieldId" value="@Model.FieldId" />
+
+    <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label small mb-1">Target property</label>
+            <input name="Fields[@p].TargetProperty" value="@Model.TargetProperty"
+                   class="form-control form-control-sm" placeholder="InvoiceNumber" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1">Data type</label>
+            <select name="Fields[@p].DataType" class="form-select form-select-sm">
+                @foreach (var dt in dataTypes)
+                {
+                    <option value="@dt" selected="@(Model.DataType == dt)">@dt</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1">Source type</label>
+            <select name="Fields[@p].SourceType" class="form-select form-select-sm source-type">
+                @foreach (var st in sourceTypes)
+                {
+                    <option value="@st" selected="@(Model.SourceType == st)">@st</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1">Min confidence</label>
+            <input name="Fields[@p].MinConfidence" value="@Model.MinConfidence.ToString("0.00")"
+                   type="number" step="0.01" min="0" max="1" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-2 form-check ms-2">
+            <input type="checkbox" name="Fields[@p].IsRequired" value="true"
+                   class="form-check-input" id="req_@p" @(Model.IsRequired ? "checked" : "") />
+            <input type="hidden" name="Fields[@p].IsRequired" value="false" />
+            <label class="form-check-label small" for="req_@p">Required</label>
+        </div>
+        <div class="col-md-1 text-end">
+            <button type="button" class="btn btn-sm btn-outline-danger remove-row" title="Remove">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-2 mt-1">
+        @* KEY_VALUE *@
+        <div class="col-md-4" data-src="key">
+            <label class="form-label small mb-1">Source property / key pattern</label>
+            <input name="Fields[@p].KeyPattern" value="@Model.KeyPattern" list="propertyKeys"
+                   class="form-control form-control-sm" placeholder="Invoice\s*(No|Number)" />
+        </div>
+        @* REGEX *@
+        <div class="col-md-5" data-src="regex">
+            <label class="form-label small mb-1">Regex (capture group 1 = value)</label>
+            <input name="Fields[@p].SourcePattern" value="@Model.SourcePattern"
+                   class="form-control form-control-sm" placeholder="Total\s*[:\-]?\s*([\d,]+\.\d{2})" />
+        </div>
+        @* TABLE_CELL *@
+        <div class="col-md-3" data-src="table">
+            <label class="form-label small mb-1">Table header</label>
+            <input name="Fields[@p].TableHeader" value="@Model.TableHeader"
+                   class="form-control form-control-sm" placeholder="Description" />
+        </div>
+        <div class="col-md-2" data-src="table">
+            <label class="form-label small mb-1">Row</label>
+            <select name="Fields[@p].RowSelector" class="form-select form-select-sm">
+                <option value="">—</option>
+                @foreach (var rs in rowSelectors)
+                {
+                    <option value="@rs" selected="@(Model.RowSelector == rs)">@rs</option>
+                }
+            </select>
+        </div>
+        @* CONSTANT *@
+        <div class="col-md-4" data-src="const">
+            <label class="form-label small mb-1">Constant value</label>
+            <input name="Fields[@p].DefaultValue" value="@Model.DefaultValue"
+                   class="form-control form-control-sm" />
+        </div>
+    </div>
+
+    <div class="row g-2 mt-1">
+        <div class="col-12">
+            <label class="form-label small mb-1">
+                <i class="bi bi-funnel"></i> Transformer pipeline
+                <span class="text-body-secondary">(one step per line: <code>type|configJson</code>)</span>
+            </label>
+            <textarea name="Fields[@p].StepsText" rows="2"
+                      class="form-control form-control-sm font-monospace"
+                      placeholder="trim&#10;number_clean|{ &quot;decimals&quot;: 2 }">@Model.StepsText</textarea>
+        </div>
+    </div>
+</div>
