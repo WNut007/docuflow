@@ -130,3 +130,9 @@ Flow: user selects a field on the right, then clicks its box on the document to 
 Infer source type from the block type (KEY/VALUE -> KEY_VALUE, table cell -> TABLE_CELL /
 MappingTableColumn). **Never show regex or patterns to the user.** Show raw + normalized value.
 Save bindings to `MappingField` and `MappingTableColumn`.
+
+> **Note on `/dev/seed-sample` bboxes:** the dev seeder's bounding boxes are **hand-measured DEMO
+> data** for `east-repair-invoice.png`, used only to exercise the mapping UI without a live OCR
+> backend. Real bbox accuracy comes from the OCR engine (Google Document AI) at runtime. So if the
+> seeded overlay boxes look misaligned, that's a **seed-data** issue (re-measure in `DevController`),
+> **not** an overlay UI bug — the overlay JS/CSS positions every box from normalized 0..1 bboxes.

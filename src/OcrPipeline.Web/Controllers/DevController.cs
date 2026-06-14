@@ -19,7 +19,7 @@ public sealed class DevController(
     IConfiguration config,
     IDocumentRepository documents,
     OcrRepository ocrRepo,
-    MappingRepository mapping,
+    IMappingRepository mapping,
     PagePreviewRenderer previewRenderer) : Controller
 {
     /// <summary>
@@ -108,43 +108,57 @@ public sealed class DevController(
                 Confidence = conf, BBoxLeft = l, BBoxTop = t, BBoxWidth = w, BBoxHeight = h
             });
 
-        Line("East Repair Inc.", 0.98m, 0.06m, 0.05m, 0.40m, 0.030m);
-        Line("Bill To: John Smith", 0.95m, 0.06m, 0.17m, 0.35m, 0.028m);
+        // Boxes measured against samples/east-repair-invoice.png (750x1061), normalized 0..1.
 
-        Kv("Invoice No", "US-001", "US-001", 0.98m, 0.60m, 0.120m, 0.30m, 0.025m);
-        Kv("Date", "11/02/2019", "2019-02-11", 0.96m, 0.60m, 0.155m, 0.30m, 0.025m);
-        Kv("PO Number", "2312/2019", "2312/2019", 0.95m, 0.60m, 0.190m, 0.30m, 0.025m);
-        Kv("Due Date", "26/02/2019", "2019-02-26", 0.96m, 0.60m, 0.225m, 0.30m, 0.025m);
-        Kv("Subtotal", "145.00", "145.00", 0.97m, 0.62m, 0.740m, 0.26m, 0.025m);
-        Kv("Sales Tax 6.25%", "9.06", "9.06", 0.94m, 0.62m, 0.775m, 0.26m, 0.025m);
-        Kv("TOTAL", "154.06", "154.06", 0.98m, 0.62m, 0.815m, 0.26m, 0.030m);
+        // header / vendor (top-left) + Bill To
+        Line("East Repair Inc.", 0.98m, 0.073m, 0.062m, 0.210m, 0.028m);
+        Line("Bill To: John Smith", 0.95m, 0.073m, 0.252m, 0.110m, 0.022m);
 
+        // meta block (upper-right); each box frames the VALUE
+        Kv("Invoice No", "US-001",     "US-001",     0.98m, 0.840m, 0.227m, 0.090m, 0.022m);
+        Kv("Date",       "11/02/2019", "2019-02-11", 0.96m, 0.795m, 0.253m, 0.135m, 0.022m);
+        Kv("PO Number",  "2312/2019",  "2312/2019",  0.95m, 0.815m, 0.279m, 0.115m, 0.022m);
+        Kv("Due Date",   "26/02/2019", "2019-02-26", 0.96m, 0.795m, 0.305m, 0.135m, 0.022m);
+
+        // totals (right side, just below the table)
+        Kv("Subtotal",        "145.00", "145.00", 0.97m, 0.795m, 0.492m, 0.090m, 0.022m);
+        Kv("Sales Tax 6.25%", "9.06",   "9.06",   0.94m, 0.825m, 0.521m, 0.060m, 0.022m);
+        Kv("TOTAL",           "154.06", "154.06", 0.98m, 0.775m, 0.551m, 0.110m, 0.026m);
+
+        // line-items table: columns QTY | DESCRIPTION | UNIT PRICE | AMOUNT (matches the image)
         var table = new OcrTable { PageNumber = 1, TableIndex = 0, RowCount = 4, ColumnCount = 4, Confidence = 0.95m };
-        var cols = new (decimal L, decimal W)[] { (0.06m, 0.44m), (0.52m, 0.10m), (0.64m, 0.16m), (0.82m, 0.14m) };
-        string[] headers = { "Description", "Qty", "Unit Price", "Amount" };
-        var rows = new (string Desc, string Qty, string Unit, string Amt)[]
+        var cols = new (decimal L, decimal W)[]
         {
-            ("Front and rear brake cables", "1", "100.00", "100.00"),
-            ("New set of pedal arms",       "2", "15.00",  "30.00"),
-            ("Labor 3hrs",                  "3", "5.00",   "15.00"),
+            (0.073m, 0.082m),   // QTY
+            (0.155m, 0.410m),   // DESCRIPTION
+            (0.565m, 0.190m),   // UNIT PRICE
+            (0.755m, 0.172m),   // AMOUNT
         };
-        const decimal rowH = 0.035m, top0 = 0.45m;
+        string[] headers = { "QTY", "DESCRIPTION", "UNIT PRICE", "AMOUNT" };
+        var rows = new (string Qty, string Desc, string Unit, string Amt)[]
+        {
+            ("1", "Front and rear brake cables", "100.00", "100.00"),
+            ("2", "New set of pedal arms",       "15.00",  "30.00"),
+            ("3", "Labor 3hrs",                  "5.00",   "15.00"),
+        };
+        decimal[] rowTop = { 0.360m, 0.391m, 0.422m, 0.453m }; // header, row1, row2, row3
+        const decimal rowH = 0.030m;
 
         void Cell(int r, int c, bool header, string content, string? norm)
             => table.Cells.Add(new OcrTableCell
             {
                 RowIndex = r, ColIndex = c, IsHeader = header, Content = content, NormalizedContent = norm,
                 Confidence = 0.95m,
-                BBoxLeft = cols[c].L, BBoxTop = top0 + r * rowH, BBoxWidth = cols[c].W, BBoxHeight = rowH - 0.004m
+                BBoxLeft = cols[c].L, BBoxTop = rowTop[r], BBoxWidth = cols[c].W, BBoxHeight = rowH
             });
 
         for (int c = 0; c < 4; c++) Cell(0, c, true, headers[c], null);
         for (int r = 0; r < rows.Length; r++)
         {
-            Cell(r + 1, 0, false, rows[r].Desc, null);
-            Cell(r + 1, 1, false, rows[r].Qty, rows[r].Qty);
+            Cell(r + 1, 0, false, rows[r].Qty,  rows[r].Qty);
+            Cell(r + 1, 1, false, rows[r].Desc, null);
             Cell(r + 1, 2, false, rows[r].Unit, rows[r].Unit);
-            Cell(r + 1, 3, false, rows[r].Amt, rows[r].Amt);
+            Cell(r + 1, 3, false, rows[r].Amt,  rows[r].Amt);
         }
         ex.Tables.Add(table);
         return ex;
