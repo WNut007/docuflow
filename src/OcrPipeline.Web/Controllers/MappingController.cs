@@ -10,7 +10,7 @@ using OcrPipeline.Web.Services.Transform;
 namespace OcrPipeline.Web.Controllers;
 
 [Authorize]
-public sealed class MappingController(MappingRepository mapping, IDocumentRepository documents) : Controller
+public sealed class MappingController(IMappingRepository mapping, IDocumentRepository documents) : Controller
 {
     public IActionResult Index()
         => View(mapping.GetAllTemplates());
@@ -143,57 +143,55 @@ public sealed class MappingController(MappingRepository mapping, IDocumentReposi
     {
         if (payload is null || payload.TemplateId <= 0) return BadRequest();
 
+        // PARTIAL upsert: the client only sends fields the user actually changed. Fields that aren't
+        // in the payload are never touched, so their KeyPattern/SourcePattern/TableHeader and
+        // transformer steps are preserved. (Full field editing lives in the Edit screen.)
         var rows = payload.Fields.Where(f => !string.IsNullOrWhiteSpace(f.TargetProperty)).ToList();
+        int saved = 0;
 
-        var fields = rows.Select(f => new MappingField
+        foreach (var f in rows)
         {
-            FieldId = f.FieldId,
-            TargetProperty = f.TargetProperty.Trim(),
-            DataType = f.DataType,
-            IsRequired = f.IsRequired,
-            SourceType = f.SourceType,
-            // KeyPattern is derived server-side from the clicked key; never user-entered regex
-            KeyPattern = f.SourceType == "KEY_VALUE" && !string.IsNullOrWhiteSpace(f.BindingKey)
-                ? BindingInference.KeyPatternFor(f.BindingKey) : null,
-            SourcePattern = null,
-            TableHeader = Nullify(f.TableHeader),
-            RowSelector = Nullify(f.RowSelector),
-            DefaultValue = Nullify(f.DefaultValue),
-            MinConfidence = f.MinConfidence
-        }).ToList();
+            var field = new MappingField
+            {
+                FieldId = f.FieldId,
+                TargetProperty = f.TargetProperty.Trim(),
+                DataType = f.DataType,
+                IsRequired = f.IsRequired,
+                SourceType = f.SourceType,
+                // KeyPattern is derived server-side from the clicked key; never user-entered regex
+                KeyPattern = f.SourceType == "KEY_VALUE" && !string.IsNullOrWhiteSpace(f.BindingKey)
+                    ? BindingInference.KeyPatternFor(f.BindingKey) : null,
+                SourcePattern = null,
+                TableHeader = Nullify(f.TableHeader),
+                RowSelector = Nullify(f.RowSelector),
+                DefaultValue = Nullify(f.DefaultValue),
+                MinConfidence = f.MinConfidence
+            };
 
-        // Preserve each field's existing transformer steps (SaveFields replaces steps wholesale).
-        var existingSteps = mapping.GetTransformerSteps(payload.TemplateId);
-        var stepsByRow = new Dictionary<int, List<TransformerStep>>();
-        for (int i = 0; i < rows.Count; i++)
-            if (rows[i].FieldId > 0 && existingSteps.TryGetValue(rows[i].FieldId, out var st) && st.Count > 0)
-                stepsByRow[i] = st;
+            // new field always rewrites its binding; existing field only when the user (re)bound/unbound it
+            bool bindingChanged = f.FieldId <= 0 || f.BindingChanged;
+            int fieldId = mapping.UpsertFieldBinding(payload.TemplateId, field, bindingChanged);
+            saved++;
 
-        mapping.SaveFields(payload.TemplateId, fields, stepsByRow);
-
-        // Resolve (possibly newly-inserted) FieldIds by target property, then save sub-columns.
-        var saved = mapping.GetTemplateById(payload.TemplateId);
-        var idByProp = saved?.Fields.ToDictionary(f => f.TargetProperty, f => f.FieldId, StringComparer.OrdinalIgnoreCase)
-                       ?? new Dictionary<string, int>();
-
-        foreach (var f in rows.Where(f => f.SubColumns.Count > 0))
-        {
-            if (!idByProp.TryGetValue(f.TargetProperty.Trim(), out var fieldId)) continue;
-            var cols = f.SubColumns
-                .Where(c => !string.IsNullOrWhiteSpace(c.TargetSubProperty))
-                .Select(c => new MappingTableColumn
-                {
-                    FieldId = fieldId,
-                    TargetSubProperty = c.TargetSubProperty.Trim(),
-                    DataType = c.DataType,
-                    TableHeader = Nullify(c.TableHeader),
-                    SortOrder = c.SortOrder,
-                    IsActive = true
-                });
-            mapping.SaveTableColumns(fieldId, cols);
+            // only replace sub-columns when the user changed them
+            if (f.SubColumnsChanged)
+            {
+                var cols = f.SubColumns
+                    .Where(c => !string.IsNullOrWhiteSpace(c.TargetSubProperty))
+                    .Select(c => new MappingTableColumn
+                    {
+                        FieldId = fieldId,
+                        TargetSubProperty = c.TargetSubProperty.Trim(),
+                        DataType = c.DataType,
+                        TableHeader = Nullify(c.TableHeader),
+                        SortOrder = c.SortOrder,
+                        IsActive = true
+                    });
+                mapping.SaveTableColumns(fieldId, cols);
+            }
         }
 
-        return Json(new { ok = true });
+        return Json(new { ok = true, saved });
     }
 
     /// <summary>User-friendly binding summary (never a raw regex).</summary>

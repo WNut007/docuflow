@@ -17,7 +17,7 @@ builder.Services.AddSingleton(new SqlConnectionFactory(connectionString));
 builder.Services.AddScoped<UserRepository>();
 builder.Services.AddScoped<IDocumentRepository, DocumentRepository>();
 builder.Services.AddScoped<OcrRepository>();
-builder.Services.AddScoped<MappingRepository>();
+builder.Services.AddScoped<IMappingRepository, MappingRepository>();
 builder.Services.AddScoped<ProcessorRepository>();
 
 // ---- Security -------------------------------------------------------------

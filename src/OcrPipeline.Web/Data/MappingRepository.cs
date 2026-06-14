@@ -5,7 +5,7 @@ using OcrPipeline.Web.Services.Transform;
 
 namespace OcrPipeline.Web.Data;
 
-public sealed class MappingRepository(SqlConnectionFactory factory)
+public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRepository
 {
     /// <summary>Loads transformer steps for every field in a template, keyed by FieldId.</summary>
     public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int templateId)
@@ -211,6 +211,60 @@ public sealed class MappingRepository(SqlConnectionFactory factory)
         tx.Commit();
     }
 
+    /// <summary>
+    /// Partial upsert used by the visual mapper. Only the given field is written; fields not passed
+    /// in are untouched, and transformer steps are never modified (unlike SaveFields). When
+    /// bindingChanged is false, the binding columns are preserved (only metadata is updated).
+    /// </summary>
+    public int UpsertFieldBinding(int templateId, MappingField f, bool bindingChanged)
+    {
+        using var db = factory.Create();
+
+        if (f.FieldId <= 0)
+        {
+            const string insertSql = """
+                INSERT dbo.MappingField
+                    (TemplateId, TargetProperty, DataType, IsRequired, SourceType,
+                     KeyPattern, SourcePattern, TableHeader, RowSelector, DefaultValue, MinConfidence)
+                OUTPUT INSERTED.FieldId
+                VALUES
+                    (@TemplateId, @TargetProperty, @DataType, @IsRequired, @SourceType,
+                     @KeyPattern, @SourcePattern, @TableHeader, @RowSelector, @DefaultValue, @MinConfidence);
+                """;
+            f.TemplateId = templateId;
+            return (int)db.ExecuteScalar<long>(insertSql, f);
+        }
+
+        if (bindingChanged)
+        {
+            const string fullSql = """
+                UPDATE dbo.MappingField SET
+                    TargetProperty = @TargetProperty, DataType = @DataType, IsRequired = @IsRequired,
+                    SourceType = @SourceType, KeyPattern = @KeyPattern, SourcePattern = @SourcePattern,
+                    TableHeader = @TableHeader, RowSelector = @RowSelector, DefaultValue = @DefaultValue,
+                    MinConfidence = @MinConfidence
+                WHERE FieldId = @FieldId AND TemplateId = @TemplateId;
+                """;
+            f.TemplateId = templateId;
+            db.Execute(fullSql, f);
+        }
+        else
+        {
+            // metadata only — preserve the existing KeyPattern/SourcePattern/TableHeader/RowSelector
+            const string metaSql = """
+                UPDATE dbo.MappingField SET
+                    TargetProperty = @TargetProperty, DataType = @DataType,
+                    IsRequired = @IsRequired, MinConfidence = @MinConfidence
+                WHERE FieldId = @FieldId AND TemplateId = @TemplateId;
+                """;
+            db.Execute(metaSql, new
+            {
+                f.FieldId, TemplateId = templateId, f.TargetProperty, f.DataType, f.IsRequired, f.MinConfidence
+            });
+        }
+        return f.FieldId;
+    }
+
     public long SaveResult(long documentId, MappingOutcome outcome)
     {
         using var db = factory.Create();
@@ -266,7 +320,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory)
 
         long resultId = res.MappingResultId;
         const string valSql = """
-            SELECT TargetProperty, RawValue, NormalizedValue, Confidence, SourceRef, IsBelowThreshold
+            SELECT ResultValueId, FieldId, TargetProperty, RawValue, NormalizedValue,
+                   Confidence, SourceRef, IsBelowThreshold
             FROM dbo.MappingResultValue
             WHERE MappingResultId = @ResultId
             ORDER BY ResultValueId;
@@ -274,10 +329,31 @@ public sealed class MappingRepository(SqlConnectionFactory factory)
         var values = db.Query<MappedValueRow>(valSql, new { ResultId = resultId }).ToList();
         return ((decimal?)res.OverallConfidence, (bool)res.NeedsReview, (string?)res.MappedJson, values);
     }
+
+    /// <summary>
+    /// Applies a reviewer's correction to one value: sets NormalizedValue and clears the
+    /// below-threshold flag. Scoped through MappingResult so the row must belong to the document
+    /// (prevents updating another document's values via a forged id). Returns rows affected.
+    /// </summary>
+    public int UpdateResultValue(long documentId, long resultValueId, string? normalizedValue)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            UPDATE v
+            SET v.NormalizedValue = @NormalizedValue,
+                v.IsBelowThreshold = 0
+            FROM dbo.MappingResultValue v
+            JOIN dbo.MappingResult r ON r.MappingResultId = v.MappingResultId
+            WHERE v.ResultValueId = @ResultValueId AND r.DocumentId = @DocumentId;
+            """;
+        return db.Execute(sql, new { DocumentId = documentId, ResultValueId = resultValueId, NormalizedValue = normalizedValue });
+    }
 }
 
 public sealed class MappedValueRow
 {
+    public long ResultValueId { get; set; }
+    public int FieldId { get; set; }
     public string TargetProperty { get; set; } = "";
     public string? RawValue { get; set; }
     public string? NormalizedValue { get; set; }
