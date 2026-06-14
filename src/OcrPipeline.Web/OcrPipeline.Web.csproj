@@ -19,6 +19,8 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
     <!-- PDF page rasterization (PDFium, MIT). Rendered through ImageSharp for PNG previews. -->
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
+    <!-- GCS for Document AI batch processing of large/multi-page PDFs. -->
+    <PackageReference Include="Google.Cloud.Storage.V1" Version="4.15.0" />
   </ItemGroup>
 
 </Project>
