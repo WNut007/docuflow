@@ -64,6 +64,16 @@ builder.Services.AddSingleton<OcrPipeline.Web.Services.Queue.IJobQueue, OcrPipel
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Queue.JobRunner>();
 builder.Services.AddHostedService<OcrPipeline.Web.Services.Queue.PipelineWorker>();
 
+// ---- Export / Consumption (push the mapped model downstream) ---------------
+builder.Services.Configure<OcrPipeline.Web.Services.Export.ExportOptions>(builder.Configuration.GetSection("Ocr:Export"));
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IExportRepository, ExportRepository>();
+builder.Services.AddScoped<OcrPipeline.Web.Services.Export.IExportTarget, OcrPipeline.Web.Services.Export.RestWebhookExporter>();
+builder.Services.AddScoped<OcrPipeline.Web.Services.Export.IExportTarget, OcrPipeline.Web.Services.Export.ErpExporter>();
+builder.Services.AddScoped<OcrPipeline.Web.Services.Export.ExportService>();
+builder.Services.AddSingleton<OcrPipeline.Web.Services.Export.IExportQueue, OcrPipeline.Web.Services.Export.ChannelExportQueue>();
+builder.Services.AddHostedService<OcrPipeline.Web.Services.Export.ExportWorker>();
+
 // ---- Auth (cookie) --------------------------------------------------------
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

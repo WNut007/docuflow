@@ -19,6 +19,8 @@ public sealed class DocumentsController(
     IMappingRepository mappingRepo,
     IPipelineRunner pipeline,
     IJobQueue queue,
+    OcrPipeline.Web.Services.Export.IExportQueue exportQueue,
+    IExportRepository exportRepo,
     ProcessorRepository processors,
     IOcrEngine ocrEngine,
     PagePreviewRenderer previewRenderer,
@@ -116,7 +118,8 @@ public sealed class DocumentsController(
             MappingConfidence = result?.overall,
             MappingNeedsReview = result?.needsReview ?? false,
             MappedJson = result?.json,
-            MappedValues = result?.values ?? new List<MappedValueRow>()
+            MappedValues = result?.values ?? new List<MappedValueRow>(),
+            ExportLogs = exportRepo.GetLogsForDocument(id)
         };
         return View(vm);
     }
@@ -164,7 +167,7 @@ public sealed class DocumentsController(
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public IActionResult ReviewSave([FromBody] ReviewSavePayload payload)
+    public async Task<IActionResult> ReviewSave([FromBody] ReviewSavePayload payload, CancellationToken ct)
     {
         if (payload is null || payload.DocumentId <= 0) return BadRequest();
         var doc = documents.GetById(payload.DocumentId);
@@ -175,6 +178,11 @@ public sealed class DocumentsController(
             applied += mappingRepo.UpdateResultValue(payload.DocumentId, c.ResultValueId, c.NormalizedValue);
 
         var status = ReviewWorkflow.Finalize(documents, doc, applied, GetUserId());
+
+        // Auto-export on VALIDATED (off the request thread); MAPPED-no-review docs export manually.
+        if (status == "VALIDATED")
+            await exportQueue.EnqueueAsync(payload.DocumentId, ct);
+
         return Json(new { ok = true, status, corrected = applied });
     }
 

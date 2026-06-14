@@ -299,5 +299,39 @@ GO
 CREATE INDEX IX_PipelineEvent_Doc ON dbo.PipelineEvent(DocumentId, CreatedAtUtc);
 GO
 
+/* ----------------------------------------------------------------------------
+   EXPORT / CONSUMPTION  (push the mapped model downstream)
+   Also created idempotently in 07_export.sql for existing databases.
+---------------------------------------------------------------------------- */
+CREATE TABLE dbo.ExportTarget (
+    TargetId       INT IDENTITY(1,1)  NOT NULL CONSTRAINT PK_ExportTarget PRIMARY KEY,
+    Name           NVARCHAR(150)      NOT NULL,
+    Kind           VARCHAR(20)        NOT NULL,     -- REST_WEBHOOK, ERP
+    Endpoint       NVARCHAR(500)      NULL,
+    AuthHeaderName NVARCHAR(100)      NULL,         -- optional static auth header name
+    AuthSecret     NVARCHAR(400)      NULL,         -- HMAC key (+ auth header value); never logged
+    DocumentTypeId INT                NULL,         -- NULL = applies to all document types
+    IsActive       BIT                NOT NULL CONSTRAINT DF_ExportTarget_Active DEFAULT(1),
+    CreatedAtUtc   DATETIME2(3)       NOT NULL CONSTRAINT DF_ExportTarget_Created DEFAULT(SYSUTCDATETIME()),
+    CONSTRAINT FK_ExportTarget_Type FOREIGN KEY (DocumentTypeId) REFERENCES dbo.DocumentType(DocumentTypeId)
+);
+GO
+
+CREATE TABLE dbo.ExportLog (
+    LogId           BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ExportLog PRIMARY KEY,
+    DocumentId      BIGINT               NOT NULL,
+    TargetId        INT                  NULL,
+    StatusCode      VARCHAR(20)          NOT NULL,   -- SUCCESS / FAILED
+    HttpStatus      INT                  NULL,
+    ResponseSnippet NVARCHAR(500)        NULL,        -- truncated response; never a secret/signature
+    Attempt         INT                  NOT NULL CONSTRAINT DF_ExportLog_Attempt DEFAULT(1),
+    CreatedAtUtc    DATETIME2(3)         NOT NULL CONSTRAINT DF_ExportLog_Created DEFAULT(SYSUTCDATETIME()),
+    CONSTRAINT FK_ExportLog_Doc    FOREIGN KEY (DocumentId) REFERENCES dbo.Document(DocumentId),
+    CONSTRAINT FK_ExportLog_Target FOREIGN KEY (TargetId)   REFERENCES dbo.ExportTarget(TargetId)
+);
+GO
+CREATE INDEX IX_ExportLog_Doc ON dbo.ExportLog(DocumentId, CreatedAtUtc);
+GO
+
 PRINT 'Schema created.';
 GO

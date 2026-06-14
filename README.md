@@ -29,9 +29,9 @@ This repo follows the staged build plan in `docs/cc-build-plan.md`. **The core p
 | 6 | Offline accuracy/ground-truth tests (English + Thai) |
 | 7 | Batch processing for large/multi-page PDFs via Google Cloud Storage (`BatchProcessDocuments`) |
 | 8 | Queue processing off the request thread (`Channel` + `BackgroundService`, retry/backoff, honoring `Processor.ProcessorMode`) |
+| 9 | Consumption stage: export the mapped model to REST/webhook (HMAC-signed) + ERP stub; auto on VALIDATED → CONSUMED |
 
-**Not yet built (production stage, Prompt 9):**
-- **9** — Consumption stage: export the mapped model to ERP / REST / webhook.
+**All build-plan prompts (0–9) are complete.**
 
 > The inline `PipelineService` runs all stages on the request thread today (mockup). Real queueing
 > is Prompt 8.
@@ -70,6 +70,7 @@ sqlcmd -S <YOUR_SERVER> -E -i database/03_features.sql         # Processor, Docu
 sqlcmd -S <YOUR_SERVER> -E -i database/04_normalized_content.sql  # adds OcrTextBlock/OcrTableCell.NormalizedContent
 sqlcmd -S <YOUR_SERVER> -E -i database/05_table_columns.sql    # adds dbo.MappingTableColumn
 sqlcmd -S <YOUR_SERVER> -E -i database/06_table_cell_bbox.sql  # adds OcrTableCell bbox columns
+sqlcmd -S <YOUR_SERVER> -E -i database/07_export.sql           # adds dbo.ExportTarget + dbo.ExportLog (+ a disabled sample target)
 ```
 
 `04`–`06` are **idempotent migrations** (`IF COL_LENGTH … / IF OBJECT_ID … IS NULL`). On a fresh
@@ -210,6 +211,31 @@ concurrency (`Ocr:Queue:MaxConcurrency`), opening a **fresh DI scope per job** a
 queue-agnostic and need **no changes**. (A durable queue also removes the need for startup
 re-enqueue.)
 
+## Export / Consumption
+
+When a document is **VALIDATED** (in the review screen), an export job is **enqueued** (dedicated
+export queue + `ExportWorker`, mirroring the pipeline queue — off the request thread). For each
+**active** `ExportTarget` matching the document type (or all types when `DocumentTypeId` is null) the
+mapped JSON is sent and an `ExportLog` row is written. The document moves to **CONSUMED** only when
+**all** active targets succeed **and at least one ran** (zero targets ≠ success — it stays
+VALIDATED). Config `Ocr:Export`: `MaxConcurrency`, `Capacity`, `TimeoutSeconds`.
+
+- **`RestWebhookExporter`** POSTs the JSON and signs the **exact body bytes** with HMAC-SHA256:
+  header `X-Signature: sha256=<hex>` using the target's `AuthSecret`, plus an optional
+  `{AuthHeaderName}: {AuthSecret}` auth header. The outbound call has a configurable timeout and
+  honours the worker's cancellation token (a hanging webhook can't stall shutdown).
+- **`ErpExporter`** is a clearly-marked **stub / extension point** — it returns non-success, so an
+  ERP-only document is never marked CONSUMED. Replace `SendAsync` with a real ERP client.
+- **Secrets are never logged.** `ExportLog` stores only the HTTP status and a truncated response
+  snippet — never the `AuthSecret` or the signature.
+- **Triggers:** automatic on VALIDATED; MAPPED-no-review documents export via the **Re-export** button
+  (Document Detail) — single attempt per enqueue, with re-export as the retry. The export job
+  re-checks status (only VALIDATED/CONSUMED) so a stale enqueue is a no-op.
+- **Admin:** `/Exports` lists targets + recent attempts; per-document logs + Re-export are on the
+  Document Detail page. Targets are configured in `dbo.ExportTarget` (set `IsActive = 1` to enable).
+- **IAM/secrets:** outbound auth is the target's `AuthSecret`; store production secrets out of source
+  control (the seeded sample target is **disabled** with a placeholder secret).
+
 ## Tests
 
 All tests are **offline** — no Tesseract, Google, network, or database. They run the pure
@@ -288,6 +314,6 @@ docs/cc-build-plan.md           The staged build plan (Prompts 0–9)
 
 ## Roadmap
 
-Remaining production-stage prompt in `docs/cc-build-plan.md`: **9** Consumption stage (export the
-mapped model to ERP / REST / webhook with retry + audit). (**7** GCS batch OCR and **8** queue
-processing are done.)
+**All build-plan prompts (0–9) are implemented.** Natural next steps beyond the plan: real ERP
+exporter, durable queues (Azure/RabbitMQ/Hangfire) behind `IJobQueue`/`IExportQueue`, export
+retry/backoff, and a target-management UI.

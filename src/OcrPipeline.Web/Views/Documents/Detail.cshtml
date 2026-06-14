@@ -157,3 +157,49 @@ else
         </div>
     }
 }
+
+@* ---- Export / Consumption ---- *@
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-send"></i> Export</span>
+        @if (d.StatusCode is "VALIDATED" or "CONSUMED")
+        {
+            <form asp-controller="Exports" asp-action="Reexport" method="post" class="m-0">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="documentId" value="@d.DocumentId" />
+                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-repeat"></i> Re-export</button>
+            </form>
+        }
+    </div>
+    <div class="card-body">
+        @if (TempData["ExportMsg"] is string exportMsg)
+        {
+            <div class="alert alert-info py-2"><i class="bi bi-info-circle"></i> @exportMsg</div>
+        }
+        @if (Model.ExportLogs.Count == 0)
+        {
+            <p class="text-body-secondary small mb-0">
+                No export attempts yet. Documents are exported automatically when they reach
+                <span class="badge text-bg-success">VALIDATED</span> (for active targets).
+            </p>
+        }
+        else
+        {
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light"><tr><th>When (UTC)</th><th>Target</th><th>Status</th><th>HTTP</th><th>Response</th></tr></thead>
+                <tbody>
+                @foreach (var l in Model.ExportLogs)
+                {
+                    <tr>
+                        <td class="small text-body-secondary">@l.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@(l.TargetName ?? l.TargetId?.ToString() ?? "—")</td>
+                        <td><span class="badge text-bg-@(l.StatusCode == "SUCCESS" ? "success" : "danger")">@l.StatusCode</span></td>
+                        <td>@(l.HttpStatus?.ToString() ?? "—")</td>
+                        <td class="small text-truncate" style="max-width: 360px;">@l.ResponseSnippet</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>

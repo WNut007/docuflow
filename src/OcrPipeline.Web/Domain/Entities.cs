@@ -159,6 +159,31 @@ public sealed class Processor
     public bool IsActive { get; set; } = true;
 }
 
+public sealed class ExportTarget
+{
+    public int TargetId { get; set; }
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "REST_WEBHOOK";   // REST_WEBHOOK / ERP
+    public string? Endpoint { get; set; }
+    public string? AuthHeaderName { get; set; }
+    public string? AuthSecret { get; set; }              // HMAC key / auth value — never logged
+    public int? DocumentTypeId { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class ExportLog
+{
+    public long LogId { get; set; }
+    public long DocumentId { get; set; }
+    public int? TargetId { get; set; }
+    public string StatusCode { get; set; } = "";         // SUCCESS / FAILED
+    public int? HttpStatus { get; set; }
+    public string? ResponseSnippet { get; set; }
+    public int Attempt { get; set; } = 1;
+    public DateTime CreatedAtUtc { get; set; }
+    public string? TargetName { get; set; }              // joined for the admin UI (not a column)
+}
+
 public sealed class DocumentProperty
 {
     public long PropertyId { get; set; }

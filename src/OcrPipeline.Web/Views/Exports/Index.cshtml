@@ -1,0 +1,70 @@
+@model ExportsViewModel
+@{ ViewData["Title"] = "Exports"; }
+
+<h1 class="h3 mb-3"><i class="bi bi-send"></i> Export targets</h1>
+<p class="text-body-secondary">
+    Active targets receive the mapped model when a document is <strong>VALIDATED</strong>; when all
+    succeed the document moves to <span class="badge text-bg-dark">CONSUMED</span>. Targets are
+    configured in <code>dbo.ExportTarget</code> (see <code>database/07_export.sql</code>).
+</p>
+
+<div class="card mb-4">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>Name</th><th>Kind</th><th>Endpoint</th><th>Doc type</th><th>Active</th></tr>
+            </thead>
+            <tbody>
+            @if (Model.Targets.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-body-secondary py-4">No export targets configured.</td></tr>
+            }
+            @foreach (var t in Model.Targets)
+            {
+                <tr>
+                    <td class="fw-semibold">@t.Name</td>
+                    <td><span class="badge text-bg-light">@t.Kind</span></td>
+                    <td class="small text-body-secondary">@t.Endpoint</td>
+                    <td>@(t.DocumentTypeId?.ToString() ?? "all")</td>
+                    <td>
+                        @if (t.IsActive)
+                        { <span class="badge text-bg-success">active</span> }
+                        else
+                        { <span class="badge text-bg-secondary">disabled</span> }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<h2 class="h5 mb-2">Recent export attempts</h2>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>When (UTC)</th><th>Document</th><th>Target</th><th>Status</th><th>HTTP</th><th>Response</th></tr>
+            </thead>
+            <tbody>
+            @if (Model.RecentLogs.Count == 0)
+            {
+                <tr><td colspan="6" class="text-center text-body-secondary py-4">No export attempts yet.</td></tr>
+            }
+            @foreach (var l in Model.RecentLogs)
+            {
+                <tr>
+                    <td class="small text-body-secondary">@l.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td><a asp-controller="Documents" asp-action="Detail" asp-route-id="@l.DocumentId">#@l.DocumentId</a></td>
+                    <td>@(l.TargetName ?? l.TargetId?.ToString() ?? "—")</td>
+                    <td>
+                        <span class="badge text-bg-@(l.StatusCode == "SUCCESS" ? "success" : "danger")">@l.StatusCode</span>
+                    </td>
+                    <td>@(l.HttpStatus?.ToString() ?? "—")</td>
+                    <td class="small text-truncate" style="max-width: 320px;">@l.ResponseSnippet</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
