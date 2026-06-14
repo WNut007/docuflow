@@ -69,7 +69,7 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
                 }
             }
 
-            var resolved = Resolve(field, extraction);
+            var resolved = Resolve(field, extraction, dateOrder);
 
             // run the transformer pipeline on the resolved value
             if (stepsByField.TryGetValue(field.FieldId, out var steps) && steps.Count > 0)
@@ -113,16 +113,16 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         return dict;
     }
 
-    private static MappedValue Resolve(MappingField field, OcrExtraction ex) => field.SourceType switch
+    private MappedValue Resolve(MappingField field, OcrExtraction ex, DayMonthOrder order) => field.SourceType switch
     {
-        "KEY_VALUE"  => FromKeyValue(field, ex),
-        "REGEX"      => FromRegex(field, ex),
-        "TABLE_CELL" => FromTable(field, ex),
+        "KEY_VALUE"  => FromKeyValue(field, ex, order),
+        "REGEX"      => FromRegex(field, ex, order),
+        "TABLE_CELL" => FromTable(field, ex, order),
         "CONSTANT"   => new MappedValue { RawValue = field.DefaultValue, NormalizedValue = field.DefaultValue, Confidence = 1m },
         _            => new MappedValue { Confidence = 0m }
     };
 
-    private static MappedValue FromKeyValue(MappingField field, OcrExtraction ex)
+    private MappedValue FromKeyValue(MappingField field, OcrExtraction ex, DayMonthOrder order)
     {
         if (field.KeyPattern is null) return Empty(field);
         var rx = new Regex(field.KeyPattern, RegexOptions.IgnoreCase);
@@ -137,7 +137,7 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
                 return new MappedValue
                 {
                     RawValue = val,
-                    NormalizedValue = Normalize(field.DataType, val),
+                    NormalizedValue = NormalizeSingle(field.DataType, val, order),
                     Confidence = b.Confidence,
                     SourceRef = $"TextBlock:{b.TextBlockId}"
                 };
@@ -145,7 +145,7 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         return Empty(field);
     }
 
-    private static MappedValue FromRegex(MappingField field, OcrExtraction ex)
+    private MappedValue FromRegex(MappingField field, OcrExtraction ex, DayMonthOrder order)
     {
         if (field.SourcePattern is null) return Empty(field);
         var rx = new Regex(field.SourcePattern, RegexOptions.IgnoreCase);
@@ -161,13 +161,13 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         return new MappedValue
         {
             RawValue = captured,
-            NormalizedValue = Normalize(field.DataType, captured),
+            NormalizedValue = NormalizeSingle(field.DataType, captured, order),
             Confidence = conf,
             SourceRef = "Regex:fulltext"
         };
     }
 
-    private static MappedValue FromTable(MappingField field, OcrExtraction ex)
+    private MappedValue FromTable(MappingField field, OcrExtraction ex, DayMonthOrder order)
     {
         if (field.TableHeader is null) return Empty(field);
 
@@ -200,7 +200,7 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
             return new MappedValue
             {
                 RawValue = raw,
-                NormalizedValue = field.RowSelector == "ALL" ? raw : Normalize(field.DataType, raw),
+                NormalizedValue = field.RowSelector == "ALL" ? raw : NormalizeSingle(field.DataType, raw, order),
                 Confidence = conf,
                 SourceRef = $"Table:{table.TableIndex}/Col:{col}"
             };
@@ -289,21 +289,21 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         }
     }
 
-    private static string? Normalize(string dataType, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        var v = value.Trim();
-        return dataType switch
+    /// <summary>
+    /// Single-value normalization. Uses the SAME <see cref="NormalizeTyped"/> implementation as the
+    /// table-cell path (one normalization path for the whole engine), then renders it as a string
+    /// (Prompt 3 decision B: single values stay strings, only line_item arrays are typed JSON).
+    /// </summary>
+    private string? NormalizeSingle(string dataType, string? raw, DayMonthOrder order)
+        => NormalizeTyped(dataType, raw, order) switch
         {
-            "DECIMAL" => decimal.TryParse(v.Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out var d)
-                            ? d.ToString(CultureInfo.InvariantCulture) : v,
-            "INT"     => int.TryParse(v.Replace(",", ""), out var i) ? i.ToString() : v,
-            "DATE"    => DateTime.TryParse(v, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
-                            ? dt.ToString("yyyy-MM-dd") : v,
-            "BOOL"    => (v is "1" or "true" or "yes" or "Y").ToString(),
-            _         => v
+            null => null,
+            string s => s,                                             // STRING / DATE (ISO)
+            decimal d => d.ToString(CultureInfo.InvariantCulture),     // "145.00"
+            long l => l.ToString(CultureInfo.InvariantCulture),        // "1"
+            bool b => b.ToString(),                                    // "True" / "False"
+            var other => Convert.ToString(other, CultureInfo.InvariantCulture)
         };
-    }
 
     private static MappedValue Empty(MappingField field) => new()
     {

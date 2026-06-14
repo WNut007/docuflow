@@ -195,3 +195,32 @@ Transformer ที่มีให้ (`Services/Transform/Transformers.cs`):
 
 > ไฟล์ใหญ่/หลายหน้า (> ~15 หน้า): ต้องใช้ batch processing ผ่าน Google Cloud Storage แทน online process — เป็นจุดต่อยอด
 
+
+## Accuracy tests (offline) & real OCR
+
+The mapping/normalization accuracy is covered by **offline** tests (no Tesseract/Google/network/DB):
+they feed a synthetic `OcrExtraction` per sample and run `MappingEngine`, asserting the CLAUDE.md
+ground truth.
+
+```bash
+dotnet test tests/OcrPipeline.Tests
+# accuracy fixtures live in:
+#   tests/OcrPipeline.Tests/InvoicePipelineTests.cs   (English East Repair + Thai)
+#   tests/OcrPipeline.Tests/LineItemMappingTests.cs   (line_item typed array)
+```
+
+- **English** (`samples/east-repair-invoice.png`): asserts `invoice_id "US-001"`,
+  `invoice_date "2019-02-11"` (dd/MM — the Due Date `26/02` makes the document day-first),
+  `subtotal 145.00`, `sales_tax 9.06`, `total 154.06`, and `line_item` = 3 typed rows.
+- **Thai** (`samples/thai-invoice.png`): asserts Thai digits `๐-๙` → Arabic and a Buddhist-era
+  (พ.ศ.) date → Gregorian through the same normalization path.
+
+> `samples/thai-invoice.png` is a **synthetic** fixture produced by
+> `scripts/generate-thai-sample.ps1` (Windows, `System.Drawing` + Tahoma). The offline test does
+> **not** read the image — it feeds an `OcrExtraction` modelling the same content.
+
+**Running the same assertions against a real Google Document AI run:** set
+`Ocr:Provider = "GoogleDocAi"` (+ processor config, see above), run the app, and upload
+`samples/east-repair-invoice.png`. The mapped JSON on the document's Detail/Review screen should
+match the same ground truth. Real OCR text/confidence can vary, so treat exact-string equality as a
+guide rather than a hard gate when validating against live OCR.
