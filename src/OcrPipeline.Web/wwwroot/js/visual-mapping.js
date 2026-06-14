@@ -25,6 +25,8 @@
             rowSelector: f.rowSelector, defaultValue: f.defaultValue,
             minConfidence: f.minConfidence, bindingLabel: f.bindingLabel,
             bindingKey: null, raw: null, norm: null,
+            // dirty flags drive the partial save — untouched fields are never sent
+            _bindingChanged: false, _subChanged: false, _metaChanged: false,
             subColumns: (f.subColumns || []).map(c => ({ ...c }))
         };
     }
@@ -33,7 +35,6 @@
     const $ = id => document.getElementById(id);
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     function setStatus(t) { $("status").textContent = t || ""; }
-    const norm = v => Math.max(0, Math.min(1, Number(v) || 0));
 
     // ---- document / image -----------------------------------------------------
     async function loadDoc() {
@@ -44,6 +45,11 @@
             const res = await fetch(`/api/documents/${state.documentId}/ocr`, { headers: { Accept: "application/json" } });
             state.ocr = res.ok ? await res.json() : { pages: [], blocks: [], tables: [] };
         } catch { state.ocr = { pages: [], blocks: [], tables: [] }; }
+
+        // Boxes are positioned in PERCENT, so they're resolution-independent and track the
+        // rendered <img> automatically. We just need the stage to have its rendered size, which
+        // only exists once the image has loaded — renderOverlay therefore runs now (in case the
+        // image is already cached) and again on the image's 'load' event (see wiring below).
         renderOverlay();
         renderRight();
         updatePager();
@@ -55,30 +61,19 @@
         $("nextPage").disabled = state.page >= state.pageCount;
     }
 
-    function placeBox(parent, bbox, cls, title, onClick) {
-        const d = el("div", cls);
-        d.style.left = (norm(bbox.left) * 100) + "%";
-        d.style.top = (norm(bbox.top) * 100) + "%";
-        d.style.width = (norm(bbox.width) * 100) + "%";
-        d.style.height = (norm(bbox.height) * 100) + "%";
-        d.title = title || "";
-        d.addEventListener("click", onClick);
-        parent.appendChild(d);
-    }
-
     function renderOverlay() {
-        const ov = $("overlay");
-        ov.innerHTML = "";
+        const specs = [];
         // text blocks (KEY/VALUE/LINE) -> KEY_VALUE binding
         (state.ocr.blocks || []).filter(b => b.page === state.page && b.bbox).forEach(b => {
-            placeBox(ov, b.bbox, "vm-box vm-box-" + (b.type || "LINE").toLowerCase(), b.text, () => bindBlock(b));
+            specs.push({ bbox: b.bbox, className: "vm-box vm-box-" + (b.type || "LINE").toLowerCase(), title: b.text, onClick: () => bindBlock(b) });
         });
         // table cells with geometry -> bind a sub-field/field via the cell's column header
         (state.ocr.tables || []).filter(t => t.page === state.page).forEach(t => {
             (t.cells || []).filter(c => c.bbox).forEach(c => {
-                placeBox(ov, c.bbox, "vm-box vm-cell" + (c.isHeader ? " vm-cell-header" : ""), c.text, () => bindCell(t, c));
+                specs.push({ bbox: c.bbox, className: "vm-box vm-cell" + (c.isHeader ? " vm-cell-header" : ""), title: c.text, onClick: () => bindCell(t, c) });
             });
         });
+        OcrOverlay.render($("overlay"), specs);
     }
 
     // ---- binding --------------------------------------------------------------
@@ -92,6 +87,7 @@
         f.bindingKey = keyFromText(block.text);
         f.bindingLabel = f.bindingKey;
         f.raw = block.text; f.norm = block.normalizedValue;
+        f._bindingChanged = true;
         setStatus(`Bound ${f.targetProperty || "field"} → "${f.bindingKey}"`);
         renderRight();
     }
@@ -114,11 +110,13 @@
         const f = state.fields[state.armed.fieldIdx];
         if (state.armed.subIdx != null) {
             f.subColumns[state.armed.subIdx].tableHeader = headerText;
+            f._subChanged = true;
         } else {
             f.sourceType = "TABLE_CELL";
             f.tableHeader = headerText;
             if (!f.rowSelector) f.rowSelector = "ALL";
             f.bindingLabel = headerText;
+            f._bindingChanged = true;
         }
         setStatus(`Bound column "${headerText}"`);
         renderRight();
@@ -164,10 +162,10 @@
             const head = el("div", "d-flex gap-2 align-items-center");
             const name = el("input", "form-control form-control-sm");
             name.value = f.targetProperty; name.placeholder = "target property";
-            name.addEventListener("input", () => { f.targetProperty = name.value; });
+            name.addEventListener("input", () => { f.targetProperty = name.value; f._metaChanged = true; });
             const dt = el("select", "form-select form-select-sm", null); dt.style.maxWidth = "110px";
             ["STRING", "DECIMAL", "DATE", "INT", "BOOL"].forEach(o => { const op = el("option", null, o); op.selected = f.dataType === o; dt.appendChild(op); });
-            dt.addEventListener("change", () => { f.dataType = dt.value; });
+            dt.addEventListener("change", () => { f.dataType = dt.value; f._metaChanged = true; });
             const armBtn = el("button", "btn btn-sm " + (isArmed(fi, null) ? "btn-warning" : "btn-outline-primary"), "Select");
             armBtn.type = "button"; armBtn.addEventListener("click", () => arm(fi, null));
             head.append(name, dt, armBtn);
@@ -177,7 +175,7 @@
             if (f.bindingLabel) {
                 const un = el("button", "btn btn-sm btn-outline-danger py-0", ""); un.type = "button";
                 un.appendChild(el("i", "bi bi-x"));
-                un.addEventListener("click", () => { f.bindingLabel = null; f.bindingKey = null; f.tableHeader = null; f.raw = f.norm = null; renderRight(); });
+                un.addEventListener("click", () => { f.bindingLabel = null; f.bindingKey = null; f.tableHeader = null; f.raw = f.norm = null; f._bindingChanged = true; renderRight(); });
                 tools.appendChild(un);
             }
 
@@ -254,15 +252,20 @@
 
     // ---- save -----------------------------------------------------------------
     async function save() {
+        // Partial save: only send fields the user actually changed (bound/unbound/edited or new).
+        const isNew = f => !(f.fieldId > 0);
         const payload = {
             templateId: state.templateId,
             fields: state.fields
                 .filter(f => (f.targetProperty || "").trim().length > 0)
+                .filter(f => isNew(f) || f._bindingChanged || f._subChanged || f._metaChanged)
                 .map(f => ({
                     fieldId: f.fieldId, targetProperty: f.targetProperty, dataType: f.dataType,
                     isRequired: !!f.isRequired, sourceType: f.sourceType, bindingKey: f.bindingKey,
                     tableHeader: f.tableHeader, rowSelector: f.rowSelector, defaultValue: f.defaultValue,
                     minConfidence: f.minConfidence || 0.6,
+                    bindingChanged: isNew(f) || !!f._bindingChanged,
+                    subColumnsChanged: isNew(f) ? (f.subColumns || []).length > 0 : !!f._subChanged,
                     subColumns: (f.subColumns || []).map(c => ({
                         columnId: c.columnId || 0, targetSubProperty: c.targetSubProperty,
                         dataType: c.dataType, tableHeader: c.tableHeader, sortOrder: c.sortOrder || 0
@@ -285,10 +288,12 @@
     $("nextPage").addEventListener("click", () => { if (state.page < state.pageCount) { state.page++; loadDoc(); } });
     $("filter").addEventListener("input", renderRight);
     $("addField").addEventListener("click", () => {
-        state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, sourceType: "KEY_VALUE", minConfidence: 0.6, subColumns: [], bindingLabel: null, bindingKey: null });
+        state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, sourceType: "KEY_VALUE", minConfidence: 0.6, subColumns: [], bindingLabel: null, bindingKey: null, _bindingChanged: true, _subChanged: false, _metaChanged: false });
         state.tab = "fields"; renderRight();
     });
     $("saveBtn").addEventListener("click", save);
+    // shared render-timing safety net: re-place boxes once the image has its rendered size
+    OcrOverlay.onImageReady($("pageImg"), renderOverlay);
     document.getElementById("tabs").addEventListener("click", e => {
         const a = e.target.closest("[data-tab]"); if (!a) return;
         e.preventDefault();
