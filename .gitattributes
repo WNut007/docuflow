@@ -1,0 +1,17 @@
+# Normalize line endings. Let git detect text vs binary and store text as LF in the repo,
+# which stops the "LF will be replaced by CRLF" warnings and keeps diffs clean.
+* text=auto
+
+# Source files: enforce LF in the repo and the working tree.
+*.cs     text eol=lf
+*.cshtml text eol=lf
+*.js     text eol=lf
+*.css    text eol=lf
+*.sql    text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+
+# Binary assets: never normalize or diff as text.
+*.png    binary
+*.pdf    binary
+*.ico    binary
