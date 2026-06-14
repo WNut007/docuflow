@@ -18,3 +18,11 @@
 .vm-cell { border-color: rgba(111,66,193,.55); background: rgba(111,66,193,.07); }
 .vm-cell:hover { background: rgba(111,66,193,.20); border-color: rgba(111,66,193,.9); }
 .vm-cell-header { border-style: dashed; border-color: rgba(111,66,193,.85); }
+
+/* Accuracy review (Prompt 5) — confidence-banded overlay boxes */
+.vm-band-success { border-color: rgba(25,135,84,.85); background: rgba(25,135,84,.10); }
+.vm-band-warning { border-color: rgba(255,193,7,.95); background: rgba(255,193,7,.12); }
+.vm-band-danger  { border-color: rgba(220,53,69,.90); background: rgba(220,53,69,.12); }
+.vm-chip { position: absolute; left: 0; bottom: 100%; font-size: .65rem; line-height: 1.1;
+           padding: 0 .25rem; border-radius: .2rem; white-space: nowrap; max-width: 240px;
+           overflow: hidden; text-overflow: ellipsis; }

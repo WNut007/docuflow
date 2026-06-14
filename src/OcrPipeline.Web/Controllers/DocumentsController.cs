@@ -6,6 +6,7 @@ using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
 using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Imaging;
+using OcrPipeline.Web.Services.Mapping;
 
 namespace OcrPipeline.Web.Controllers;
 
@@ -13,7 +14,7 @@ namespace OcrPipeline.Web.Controllers;
 public sealed class DocumentsController(
     IDocumentRepository documents,
     OcrRepository ocrRepo,
-    MappingRepository mappingRepo,
+    IMappingRepository mappingRepo,
     PipelineService pipeline,
     PagePreviewRenderer previewRenderer,
     IConfiguration config) : Controller
@@ -103,6 +104,72 @@ public sealed class DocumentsController(
             MappedValues = result?.values ?? new List<MappedValueRow>()
         };
         return View(vm);
+    }
+
+    // ---- Accuracy review (Prompt 5) ---------------------------------------
+
+    [HttpGet]
+    public IActionResult Review(long id)
+    {
+        var doc = documents.GetById(id);
+        if (doc is null) return NotFound();
+
+        decimal cutoff = config.GetValue<decimal?>("Ocr:MinPageConfidence") ?? 0.60m;
+        var result = mappingRepo.GetLatestResult(id);
+
+        if (result is null)
+            return View(new ReviewViewModel
+            {
+                Document = doc, HasResult = false, Cutoff = cutoff, PageCount = doc.PageCount
+            });
+
+        var values = result.Value.values.Select(v => new ReviewValueModel
+        {
+            ResultValueId = v.ResultValueId,
+            TargetProperty = v.TargetProperty,
+            RawValue = v.RawValue,
+            NormalizedValue = v.NormalizedValue,
+            Confidence = v.Confidence,
+            IsBelowThreshold = v.IsBelowThreshold,
+            BandClass = ConfidenceBands.CssClass(ConfidenceBands.Band(v.Confidence, cutoff)),
+            BlockId = BlockIdFromSourceRef(v.SourceRef)
+        }).ToList();
+
+        return View(new ReviewViewModel
+        {
+            Document = doc,
+            HasResult = true,
+            NeedsReview = result.Value.needsReview,
+            OverallConfidence = result.Value.overall,
+            Cutoff = cutoff,
+            PageCount = doc.PageCount,
+            Values = values
+        });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult ReviewSave([FromBody] ReviewSavePayload payload)
+    {
+        if (payload is null || payload.DocumentId <= 0) return BadRequest();
+        var doc = documents.GetById(payload.DocumentId);
+        if (doc is null) return NotFound();
+
+        int applied = 0;
+        foreach (var c in payload.Corrections)
+            applied += mappingRepo.UpdateResultValue(payload.DocumentId, c.ResultValueId, c.NormalizedValue);
+
+        var status = ReviewWorkflow.Finalize(documents, doc, applied, GetUserId());
+        return Json(new { ok = true, status, corrected = applied });
+    }
+
+    private static string? BlockIdFromSourceRef(string? sourceRef)
+    {
+        const string prefix = "TextBlock:";
+        if (sourceRef is not null && sourceRef.StartsWith(prefix, StringComparison.Ordinal)
+            && long.TryParse(sourceRef.AsSpan(prefix.Length), out var textBlockId))
+            return $"block-{textBlockId}";
+        return null;
     }
 
     private int? GetUserId()

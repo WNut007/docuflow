@@ -1,0 +1,105 @@
+@model ReviewViewModel
+@{
+    ViewData["Title"] = "Review";
+    var data = new
+    {
+        documentId = Model.Document.DocumentId,
+        pageCount = Model.PageCount,
+        values = Model.Values
+    };
+}
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <h1 class="h4 mb-0"><i class="bi bi-clipboard-check"></i> Review: @Model.Document.OriginalFileName</h1>
+        <div class="text-body-secondary small">
+            Status <partial name="_StatusBadge" model="@Model.Document.StatusCode" />
+            @if (Model.HasResult && Model.OverallConfidence is { } oc)
+            {
+                <span class="ms-2">overall confidence @oc.ToString("P0")</span>
+            }
+        </div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" asp-action="Detail" asp-route-id="@Model.Document.DocumentId">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+@if (!Model.HasResult)
+{
+    <div class="card">
+        <div class="card-body text-center text-body-secondary py-5">
+            <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+            This document hasn't been mapped yet — there's nothing to review.
+            <div class="mt-3">
+                <a class="btn btn-sm btn-outline-primary" asp-action="Detail" asp-route-id="@Model.Document.DocumentId">
+                    Go to document
+                </a>
+            </div>
+        </div>
+    </div>
+    return;
+}
+
+@Html.AntiForgeryToken()
+
+<div class="row g-3">
+    @* LEFT: page image with mapped values overlaid on their source boxes, coloured by confidence *@
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header d-flex align-items-center gap-2">
+                <i class="bi bi-file-earmark-text"></i> Page 1 / @Model.PageCount
+                <span class="ms-auto small text-body-secondary">
+                    <span class="badge text-bg-success">high</span>
+                    <span class="badge text-bg-warning">medium</span>
+                    <span class="badge text-bg-danger">low</span>
+                    (cutoff @Model.Cutoff.ToString("P0"))
+                </span>
+            </div>
+            <div class="card-body p-2">
+                <div id="stage" class="visual-stage">
+                    <img id="pageImg" alt="page" />
+                    <div id="overlay" class="visual-overlay"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* RIGHT: editable mapped values, tinted by confidence band *@
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">Mapped values <span class="text-body-secondary small">— correct any value, then Save</span></div>
+            <div class="card-body" id="valueList">
+                @foreach (var v in Model.Values)
+                {
+                    <div class="vm-review-row border-start border-4 border-@v.BandClass ps-2 mb-2">
+                        <label class="form-label small mb-1 d-flex justify-content-between">
+                            <span class="fw-semibold">@v.TargetProperty</span>
+                            <span class="badge text-bg-@v.BandClass">@(v.Confidence is { } c ? c.ToString("P0") : "—")</span>
+                        </label>
+                        <input class="form-control form-control-sm review-input"
+                               data-rvid="@v.ResultValueId" data-original="@v.NormalizedValue"
+                               value="@v.NormalizedValue" />
+                        @if (!string.IsNullOrEmpty(v.RawValue) && v.RawValue != v.NormalizedValue)
+                        {
+                            <div class="form-text">raw: @v.RawValue</div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <span id="status" class="small text-body-secondary"></span>
+                <button type="button" class="btn btn-sm btn-primary" id="saveBtn">
+                    <i class="bi bi-check2-circle"></i> Save corrections
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="review-data" type="application/json">@Json.Serialize(data)</script>
+
+@section Scripts {
+    <script src="~/js/overlay.js" asp-append-version="true"></script>
+    <script src="~/js/review.js" asp-append-version="true"></script>
+}

@@ -17,7 +17,7 @@ namespace OcrPipeline.Web.Services;
 public sealed class PipelineService(
     IDocumentRepository documents,
     OcrRepository ocrRepo,
-    MappingRepository mappingRepo,
+    IMappingRepository mappingRepo,
     ExtractionService extraction,
     MappingEngine mappingEngine,
     ILogger<PipelineService> logger)

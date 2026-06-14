@@ -22,6 +22,14 @@ public sealed class VisualSaveField
     public string? DefaultValue { get; set; }
     public decimal MinConfidence { get; set; } = 0.60m;
 
+    /// <summary>True when the user (re)bound or explicitly unbound this field in this session.
+    /// Drives a PARTIAL upsert: binding columns are only rewritten when this is true, so a field
+    /// touched for some other reason (or not sent at all) keeps its existing pattern.</summary>
+    public bool BindingChanged { get; set; }
+
+    /// <summary>True when the user changed this field's sub-columns; only then are they replaced.</summary>
+    public bool SubColumnsChanged { get; set; }
+
     public List<VisualSaveSubColumn> SubColumns { get; set; } = new();
 }
 

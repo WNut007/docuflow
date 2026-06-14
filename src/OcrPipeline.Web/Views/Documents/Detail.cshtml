@@ -15,9 +15,17 @@
     <div>@await Html.PartialAsync("_StatusBadge", d.StatusCode)</div>
 </div>
 
-<a class="btn btn-sm btn-outline-secondary mb-3" asp-action="Index">
-    <i class="bi bi-arrow-left"></i> Back to list
-</a>
+<div class="mb-3 d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" asp-action="Index">
+        <i class="bi bi-arrow-left"></i> Back to list
+    </a>
+    @if (d.StatusCode is "NEEDS_REVIEW" or "VALIDATED" or "MAPPED" or "CONSUMED")
+    {
+        <a class="btn btn-sm btn-outline-primary" asp-action="Review" asp-route-id="@d.DocumentId">
+            <i class="bi bi-clipboard-check"></i> Review accuracy
+        </a>
+    }
+</div>
 
 @if (ocr is null)
 {
