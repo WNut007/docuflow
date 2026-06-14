@@ -7,6 +7,8 @@ using OcrPipeline.Web.Models;
 using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Imaging;
 using OcrPipeline.Web.Services.Mapping;
+using OcrPipeline.Web.Services.Ocr;
+using OcrPipeline.Web.Services.Queue;
 
 namespace OcrPipeline.Web.Controllers;
 
@@ -15,7 +17,10 @@ public sealed class DocumentsController(
     IDocumentRepository documents,
     OcrRepository ocrRepo,
     IMappingRepository mappingRepo,
-    PipelineService pipeline,
+    IPipelineRunner pipeline,
+    IJobQueue queue,
+    ProcessorRepository processors,
+    IOcrEngine ocrEngine,
     PagePreviewRenderer previewRenderer,
     IConfiguration config) : Controller
 {
@@ -81,8 +86,18 @@ public sealed class DocumentsController(
                 $"Preview rendering failed: {ex.Message}", userId);
         }
 
-        // run the pipeline inline (mockup); in prod this is enqueued
-        await pipeline.ProcessAsync(docId, userId, ct);
+        // Honour the active processor's mode: REALTIME runs inline; otherwise (QUEUE or none) the
+        // document is enqueued and processed off the request thread by the BackgroundService worker.
+        var processor = processors.GetActiveForEngine(ocrEngine.Name);
+        if (string.Equals(processor?.ProcessorMode, "REALTIME", StringComparison.OrdinalIgnoreCase))
+        {
+            await pipeline.ProcessAsync(docId, userId, ct);
+        }
+        else
+        {
+            await queue.EnqueueAsync(docId, ct);
+            documents.LogEvent(docId, "QUEUE", "CAPTURED", "CAPTURED", "Queued for processing", userId);
+        }
 
         return RedirectToAction(nameof(Detail), new { id = docId });
     }

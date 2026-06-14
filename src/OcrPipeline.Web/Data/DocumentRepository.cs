@@ -47,6 +47,21 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         return db.Query<Document>(sql, new { Top = top }).ToList();
     }
 
+    /// <summary>All documents in a given status (used on startup to re-enqueue CAPTURED docs).</summary>
+    public IReadOnlyList<Document> GetByStatus(string statusCode)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT DocumentId, OriginalFileName, StoredPath, ContentType, FileSizeBytes,
+                   Sha256, SourceChannel, DocumentTypeId, ClassifyConfidence, StatusCode,
+                   PageCount, UploadedByUserId, CreatedAtUtc
+            FROM dbo.Document
+            WHERE StatusCode = @StatusCode
+            ORDER BY DocumentId;
+            """;
+        return db.Query<Document>(sql, new { StatusCode = statusCode }).ToList();
+    }
+
     /// <summary>Documents of a type that already have rendered page previews (for the visual mapper).</summary>
     public IReadOnlyList<DocumentRef> GetByTypeWithPreviews(int documentTypeId, int top = 20)
     {

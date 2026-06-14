@@ -15,6 +15,7 @@ public interface IDocumentRepository
     long Insert(Document doc);
     Document? GetById(long documentId);
     IReadOnlyList<Document> GetRecent(int top = 50);
+    IReadOnlyList<Document> GetByStatus(string statusCode);
     IReadOnlyList<DocumentRef> GetByTypeWithPreviews(int documentTypeId, int top = 20);
     void InsertPages(long documentId, IEnumerable<DocumentPage> pages);
     IReadOnlyList<DocumentPage> GetPages(long documentId);

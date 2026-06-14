@@ -40,6 +40,7 @@ public sealed class PipelineFailureTests
         public long Insert(Document d) => throw new NotSupportedException();
         public IReadOnlyList<Document> GetRecent(int top = 50) => throw new NotSupportedException();
         public IReadOnlyList<DocumentRef> GetByTypeWithPreviews(int documentTypeId, int top = 20) => throw new NotSupportedException();
+        public IReadOnlyList<Document> GetByStatus(string statusCode) => throw new NotSupportedException();
         public void InsertPages(long id, IEnumerable<DocumentPage> pages) => throw new NotSupportedException();
         public IReadOnlyList<DocumentPage> GetPages(long id) => throw new NotSupportedException();
     }

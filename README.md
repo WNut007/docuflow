@@ -27,10 +27,10 @@ This repo follows the staged build plan in `docs/cc-build-plan.md`. **The core p
 | 4 | Point-and-click visual mapping screen (image overlay + click-to-bind) |
 | 5 | Accuracy review screen (confidence-banded overlay + inline correction → `VALIDATED`) |
 | 6 | Offline accuracy/ground-truth tests (English + Thai) |
+| 7 | Batch processing for large/multi-page PDFs via Google Cloud Storage (`BatchProcessDocuments`) |
+| 8 | Queue processing off the request thread (`Channel` + `BackgroundService`, retry/backoff, honoring `Processor.ProcessorMode`) |
 
-**Not yet built (production stage, Prompts 7–9):**
-- **7** — Batch processing for large/multi-page PDFs via Google Cloud Storage (`BatchProcessDocuments`).
-- **8** — Queue processing off the request thread (`Channel`/`BackgroundService`, honoring `Processor.ProcessorMode`).
+**Not yet built (production stage, Prompt 9):**
 - **9** — Consumption stage: export the mapped model to ERP / REST / webhook.
 
 > The inline `PipelineService` runs all stages on the request thread today (mockup). Real queueing
@@ -127,17 +127,30 @@ derivation stay engine-agnostic.
     "Location": "us",            // or "eu"
     "ProcessorId": "abc123",     // Form Parser / Custom Doc Extractor
     "ProcessorVersion": "",      // optional pin for reproducibility
-    "OnlinePageLimit": 15        // online ProcessDocument page cap; larger files need batch (Prompt 7)
+    "OnlinePageLimit": 15,       // online ProcessDocument page cap; larger files route to batch
+    "Bucket": "",                // GCS bucket for batch; empty = batch disabled (online only)
+    "InputPrefix": "docuflow-input",
+    "OutputPrefix": "docuflow-output",
+    "BatchTimeoutMinutes": 30
   }
 }
 ```
 
 - **Auth:** Application Default Credentials — set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account
-  JSON key (or `gcloud auth application-default login` in dev). The service account needs role
-  `roles/documentai.apiUser`.
-- NuGet: `Google.Cloud.DocumentAI.V1` (pinned in the csproj).
-- Documents over `OnlinePageLimit` throw a clear "use batch processing" error today — batch via GCS
-  is Prompt 7.
+  JSON key (or `gcloud auth application-default login` in dev).
+- **IAM:** the service account needs `roles/documentai.apiUser`; **for batch** it also needs object
+  admin on the bucket (`roles/storage.objectAdmin`, or equivalent get/create/list/delete object
+  permissions).
+- NuGet: `Google.Cloud.DocumentAI.V1`, `Google.Cloud.Storage.V1` (pinned in the csproj).
+
+**Batch processing (large / multi-page PDFs).** When a document's page count exceeds
+`OnlinePageLimit` and `Bucket` is set, the engine routes to **`BatchProcessDocuments`**: it uploads
+the file to `gs://{Bucket}/{InputPrefix}/{guid}/`, runs the long-running operation (bounded by
+`BatchTimeoutMinutes` and the request `CancellationToken`), reads the output `Document` JSON shards
+from `gs://{Bucket}/{OutputPrefix}/{guid}/`, maps them with the **same** `DocumentAiMapper` as the
+online path, then **best-effort deletes** the GCS objects (a cleanup failure is logged, not fatal).
+On batch failure the objects are left in place and the document goes to `FAILED` (with a
+`PipelineEvent`). Over the limit with no `Bucket` set is a clear configuration error.
 
 ### Tesseract `tha+eng` (offline fallback)
 
@@ -165,6 +178,37 @@ normalized values (Thai digits ๐-๙ → 0-9; currency → decimal; `dd/MM/yyy
 dates → Gregorian, with per-document day/month inference).
 
 ---
+
+## Queue processing
+
+On upload a document is inserted as `CAPTURED` and **enqueued** (the request returns immediately and
+redirects to Detail). A `BackgroundService` (`PipelineWorker`) drains the queue with bounded
+concurrency (`Ocr:Queue:MaxConcurrency`), opening a **fresh DI scope per job** and running
+`PipelineService.ProcessAsync`. Honoured config (`Ocr:Queue`): `MaxConcurrency`, `MaxAttempts`,
+`BackoffBaseSeconds` (exponential), `Capacity`.
+
+- **Processor mode:** if the active `Processor` for the engine is `REALTIME`, the upload runs the
+  pipeline inline; otherwise (`QUEUE` or none — the **default**) it's enqueued.
+- **Retry/backoff:** failed jobs retry with exponential backoff; on the final attempt the document
+  goes `FAILED` (per-stage failure recorded by `PipelineService`, plus one queue-level "gave up"
+  event).
+- **Cancellation:** the host stopping token flows through `ProcessAsync` (so a Prompt-7 batch op
+  cancels cleanly on shutdown). Host-stop cancellation is **graceful** — the doc is left
+  re-enqueueable (`CAPTURED`), not `FAILED`; a batch **timeout** cancellation is a real failure that
+  goes through the retry/FAILED path.
+- **Restart recovery:** the in-process queue is lost on restart, so on startup the worker
+  **re-enqueues** documents stuck at `CAPTURED`. Each job re-checks status inside its scope and skips
+  anything no longer `CAPTURED`, so nothing is processed twice.
+- **Backpressure:** the channel is **bounded** with `FullMode = Wait` — under an upload flood the
+  enqueuer briefly waits rather than growing unbounded or dropping jobs.
+- The Documents list shows queue state via the existing status badges (`CAPTURED` = queued,
+  `CLASSIFIED`/`EXTRACTED` = processing, `MAPPED`/`VALIDATED`/… = done, `FAILED` = failed).
+
+**Swapping in a durable queue (Azure Storage Queue / RabbitMQ / Hangfire):** implement `IJobQueue`
+(`EnqueueAsync` + `ReadAllAsync`) with the durable backend and register it instead of
+`ChannelJobQueue` in `Program.cs`. `JobRunner`, `PipelineWorker`, and `PipelineService` are
+queue-agnostic and need **no changes**. (A durable queue also removes the need for startup
+re-enqueue.)
 
 ## Tests
 
@@ -244,6 +288,6 @@ docs/cc-build-plan.md           The staged build plan (Prompts 0–9)
 
 ## Roadmap
 
-Production-stage prompts in `docs/cc-build-plan.md`: **7** GCS batch OCR for large PDFs, **8** queue
-processing (off the request thread, honoring `Processor.ProcessorMode`), **9** Consumption stage
-(export mapped model to ERP / REST / webhook with retry + audit).
+Remaining production-stage prompt in `docs/cc-build-plan.md`: **9** Consumption stage (export the
+mapped model to ERP / REST / webhook with retry + audit). (**7** GCS batch OCR and **8** queue
+processing are done.)

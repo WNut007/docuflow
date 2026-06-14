@@ -20,7 +20,7 @@ public sealed class PipelineService(
     IMappingRepository mappingRepo,
     ExtractionService extraction,
     MappingEngine mappingEngine,
-    ILogger<PipelineService> logger)
+    ILogger<PipelineService> logger) : IPipelineRunner
 {
     public async Task ProcessAsync(long documentId, int? byUserId, CancellationToken ct = default)
     {
@@ -64,6 +64,12 @@ public sealed class PipelineService(
                 documents.LogEvent(documentId, "MAP", "EXTRACTED", "FAILED",
                     "No active template or OCR result", byUserId);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation (host shutdown or the batch-timeout token) is NOT a stage failure — let
+            // the caller (queue worker) decide whether it's a graceful shutdown or a real timeout.
+            throw;
         }
         catch (Exception ex)
         {

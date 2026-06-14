@@ -32,6 +32,8 @@ builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("O
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
 builder.Services.AddSingleton<ImagePreprocessor>();
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Imaging.PagePreviewRenderer>();
+builder.Services.AddSingleton<DocumentAiMapper>();          // shared Document-proto -> OcrExtraction mapper
+builder.Services.AddSingleton<IPdfPageCounter, PdfPageCounter>();
 
 var ocrProvider = builder.Configuration["Ocr:Provider"] ?? "Tesseract";
 if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase))
@@ -54,7 +56,13 @@ builder.Services.AddScoped<IValueTransformer, TranslateTransformer>();
 builder.Services.AddScoped<TransformerPipeline>();
 
 builder.Services.AddScoped<MappingEngine>();
-builder.Services.AddScoped<PipelineService>();
+builder.Services.AddScoped<IPipelineRunner, PipelineService>();
+
+// ---- Queue processing (off the request thread) ----------------------------
+builder.Services.Configure<OcrPipeline.Web.Services.Queue.QueueOptions>(builder.Configuration.GetSection("Ocr:Queue"));
+builder.Services.AddSingleton<OcrPipeline.Web.Services.Queue.IJobQueue, OcrPipeline.Web.Services.Queue.ChannelJobQueue>();
+builder.Services.AddSingleton<OcrPipeline.Web.Services.Queue.JobRunner>();
+builder.Services.AddHostedService<OcrPipeline.Web.Services.Queue.PipelineWorker>();
 
 // ---- Auth (cookie) --------------------------------------------------------
 builder.Services
