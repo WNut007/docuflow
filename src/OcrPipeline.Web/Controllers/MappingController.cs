@@ -194,6 +194,87 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
         return Json(new { ok = true, saved });
     }
 
+    // ---- Zone designer (template-based / zonal OCR) -----------------------
+
+    [HttpGet]
+    public IActionResult Zones(int templateId, long? documentId)
+    {
+        var tpl = mapping.GetTemplateById(templateId);
+        if (tpl is null) return NotFound();
+
+        var docs = documents.GetByTypeWithPreviews(tpl.DocumentTypeId);
+        long? docId = documentId ?? docs.FirstOrDefault()?.DocumentId;
+        int pageCount = docs.FirstOrDefault(d => d.DocumentId == docId)?.PageCount ?? 0;
+
+        var templateOptions = mapping.GetAllTemplates()
+            .Where(t => t.tpl.IsActive)
+            .Select(t => new TemplateOption(t.tpl.TemplateId, $"{t.docType} — {t.tpl.Name}", t.tpl.TemplateId == templateId))
+            .ToList();
+
+        var vm = new ZoneDesignerViewModel
+        {
+            TemplateId = tpl.TemplateId,
+            Name = tpl.Name,
+            MappingMode = tpl.MappingMode,
+            DocumentTypeId = tpl.DocumentTypeId,
+            DocumentId = docId,
+            PageCount = pageCount,
+            TemplateOptions = templateOptions,
+            Documents = docs.Select(d => new DocumentOption(d.DocumentId, d.FileName, d.PageCount)).ToList(),
+            Fields = tpl.Fields.Select(f => new ZoneFieldModel
+            {
+                FieldId = f.FieldId,
+                TargetProperty = f.TargetProperty,
+                DataType = f.DataType,
+                IsRequired = f.IsRequired,
+                MinConfidence = f.MinConfidence,
+                SourceType = f.SourceType,
+                ZonePage = f.ZonePage,
+                ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
+                ZoneOcrHint = f.ZoneOcrHint, ZonePsm = f.ZonePsm
+            }).ToList()
+        };
+        return View(vm);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult ZonesSave([FromBody] ZonesSavePayload payload)
+    {
+        if (payload is null || payload.TemplateId <= 0) return BadRequest();
+
+        string mode = string.Equals(payload.MappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase)
+            ? "ZONAL" : "OCR_FIRST";
+
+        // Persist only fields that have both a name and a drawn zone.
+        var fields = payload.Fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.TargetProperty) && f.ZoneX is not null)
+            .Select(f => new MappingField
+            {
+                FieldId = f.FieldId,
+                TargetProperty = f.TargetProperty.Trim(),
+                DataType = f.DataType,
+                IsRequired = f.IsRequired,
+                MinConfidence = f.MinConfidence,
+                SourceType = "KEY_VALUE",
+                ZonePage = f.ZonePage ?? 1,
+                ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
+                ZoneOcrHint = NormalizeHint(f.ZoneOcrHint),
+                ZonePsm = f.ZonePsm
+            }).ToList();
+
+        mapping.SaveZones(payload.TemplateId, mode, fields);
+        return Json(new { ok = true, mode, saved = fields.Count });
+    }
+
+    private static string NormalizeHint(string? hint) => (hint ?? "TEXT").Trim().ToUpperInvariant() switch
+    {
+        "NUMERIC" => "NUMERIC",
+        "DATE" => "DATE",
+        "INT" => "INT",
+        _ => "TEXT"
+    };
+
     /// <summary>User-friendly binding summary (never a raw regex).</summary>
     private static string? BindingLabel(MappingField f) => f.SourceType switch
     {

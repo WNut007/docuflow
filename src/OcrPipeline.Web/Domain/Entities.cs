@@ -105,6 +105,8 @@ public sealed class MappingTemplate
     public string TargetModel { get; set; } = "";
     public int Version { get; set; } = 1;
     public bool IsActive { get; set; } = true;
+    /// <summary>OCR_FIRST (default, block-based mapping) or ZONAL (OCR only inside drawn zones).</summary>
+    public string MappingMode { get; set; } = "OCR_FIRST";
     public List<MappingField> Fields { get; set; } = new();
 }
 
@@ -122,6 +124,16 @@ public sealed class MappingField
     public string? RowSelector { get; set; }            // FIRST/LAST/ALL
     public string? DefaultValue { get; set; }
     public decimal MinConfidence { get; set; } = 0.60m;
+
+    // Zonal mapping (Phase 0): a normalized 0..1 rectangle drawn on a sample document, plus an OCR
+    // hint and optional PageSegMode override. ZoneX is null when the field has no zone.
+    public int? ZonePage { get; set; }
+    public decimal? ZoneX { get; set; }
+    public decimal? ZoneY { get; set; }
+    public decimal? ZoneW { get; set; }
+    public decimal? ZoneH { get; set; }
+    public string? ZoneOcrHint { get; set; }            // TEXT/NUMERIC/DATE/INT
+    public byte? ZonePsm { get; set; }
     /// <summary>Multi-page role this zone applies to (Phase 3): FIRST/CONTINUATION/LAST/ANY; null = ANY.</summary>
     public string? ZonePageRole { get; set; }
 }

@@ -46,6 +46,10 @@ if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase
 else
     builder.Services.AddScoped<IOcrEngine, TesseractOcrEngine>();
 
+// Zonal (template-based) OCR always uses Tesseract for cropped-region reads, regardless of the
+// whole-document provider above (Document AI does not do per-zone cropping).
+builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
+
 builder.Services.AddScoped<ExtractionService>();
 
 // Transformer plugins (Drupal-style preprocess). Register each implementation
@@ -61,6 +65,7 @@ builder.Services.AddScoped<IValueTransformer, TranslateTransformer>();
 builder.Services.AddScoped<TransformerPipeline>();
 
 builder.Services.AddScoped<MappingEngine>();
+builder.Services.AddScoped<OcrPipeline.Web.Services.Zonal.ZonalExtractionService>();
 builder.Services.AddScoped<IPipelineRunner, PipelineService>();
 
 // ---- Queue processing (off the request thread) ----------------------------

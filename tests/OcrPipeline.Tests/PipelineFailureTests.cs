@@ -45,6 +45,25 @@ public sealed class PipelineFailureTests
         public IReadOnlyList<DocumentPage> GetPages(long id) => throw new NotSupportedException();
     }
 
+    // Minimal IMappingRepository: no active template, so the pipeline takes the OCR-first path and
+    // EXTRACT (the throwing engine) is reached. No DB connection is opened.
+    private sealed class NullMappingRepository : IMappingRepository
+    {
+        public MappingTemplate? GetActiveTemplateForType(int documentTypeId) => null;
+        public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int t) => throw new NotSupportedException();
+        public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
+        public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
+        public IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates() => throw new NotSupportedException();
+        public MappingTemplate? GetTemplateById(int t) => throw new NotSupportedException();
+        public IReadOnlyList<string> GetPropertyKeysForType(int t) => throw new NotSupportedException();
+        public void SaveFields(int t, IEnumerable<MappingField> f, IReadOnlyDictionary<int, List<TransformerStep>> s) => throw new NotSupportedException();
+        public int UpsertFieldBinding(int t, MappingField f, bool b) => throw new NotSupportedException();
+        public void SaveZones(int t, string mappingMode, IEnumerable<MappingField> f) => throw new NotSupportedException();
+        public long SaveResult(long d, MappingOutcome o) => throw new NotSupportedException();
+        public (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long d) => throw new NotSupportedException();
+        public int UpdateResultValue(long d, long rv, string? n) => throw new NotSupportedException();
+    }
+
     [Fact]
     public async Task Extraction_failure_marks_document_FAILED_and_logs_event()
     {
@@ -53,12 +72,12 @@ public sealed class PipelineFailureTests
 
         var unused = new SqlConnectionFactory("unused"); // never used: extraction throws before any DB call
         var ocrRepo = new OcrRepository(unused);
-        var mappingRepo = new MappingRepository(unused);
+        var mappingRepo = new NullMappingRepository(); // no active template -> OCR-first path, EXTRACT throws
         var extraction = new ExtractionService(new ThrowingOcrEngine(), ocrRepo);
         var mappingEngine = new MappingEngine(new TransformerPipeline(Array.Empty<IValueTransformer>()), new TextNormalizer());
 
         var pipeline = new PipelineService(
-            docs, ocrRepo, mappingRepo, extraction, mappingEngine, NullLogger<PipelineService>.Instance);
+            docs, ocrRepo, mappingRepo, extraction, mappingEngine, zonal: null!, NullLogger<PipelineService>.Instance);
 
         // must not throw
         await pipeline.ProcessAsync(doc.DocumentId, byUserId: null);

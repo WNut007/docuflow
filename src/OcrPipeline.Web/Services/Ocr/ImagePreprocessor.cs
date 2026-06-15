@@ -45,6 +45,20 @@ public sealed class ImagePreprocessor
         output.SaveAsPng(outputPath);
     }
 
+    /// <summary>
+    /// Loads a page and converts it to grayscale at its ORIGINAL size for the zonal OCR path, which
+    /// then crops and upscales each drawn zone. Deliberately does NOT deskew: zones are drawn on the
+    /// (un-deskewed) page preview, so the crop source must keep the same geometry — rotating here
+    /// would resize/offset the canvas and desync every zone. (Skew-tolerant zonal extraction needs
+    /// page registration; that is a later phase. Deskew still runs in the OCR-first <see cref="Process"/>.)
+    /// </summary>
+    public Image<L8> PreparePage(string inputPath)
+    {
+        using var image = Image.Load<Rgba32>(inputPath);
+        image.Mutate(c => c.Grayscale());
+        return image.CloneAs<L8>();
+    }
+
     // ---- DPI ------------------------------------------------------------------
     /// <summary>Largest raster dimension we will ever upscale to — a guard against bogus density
     /// metadata requesting an enormous buffer (300 DPI on a US-Letter page is ~3300px).</summary>

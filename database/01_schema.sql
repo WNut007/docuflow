@@ -206,6 +206,7 @@ CREATE TABLE dbo.MappingTemplate (
     TargetModel     NVARCHAR(100)       NOT NULL,   -- e.g. "InvoiceModel"
     Version         INT                 NOT NULL CONSTRAINT DF_MappingTemplate_Ver DEFAULT(1),
     IsActive        BIT                 NOT NULL CONSTRAINT DF_MappingTemplate_Active DEFAULT(1),
+    MappingMode     VARCHAR(10)         NOT NULL CONSTRAINT DF_MappingTemplate_Mode DEFAULT('OCR_FIRST'), -- OCR_FIRST | ZONAL
     CreatedAtUtc    DATETIME2(3)        NOT NULL CONSTRAINT DF_MappingTemplate_Created DEFAULT(SYSUTCDATETIME()),
     CONSTRAINT FK_MappingTemplate_Type FOREIGN KEY (DocumentTypeId) REFERENCES dbo.DocumentType(DocumentTypeId)
 );
@@ -229,6 +230,14 @@ CREATE TABLE dbo.MappingField (
     RowSelector    VARCHAR(20)          NULL,       -- FIRST, LAST, ALL
     DefaultValue   NVARCHAR(400)        NULL,
     MinConfidence  DECIMAL(5,4)         NOT NULL CONSTRAINT DF_MappingField_MinConf DEFAULT(0.60),
+    -- Zonal mapping (Phase 0): a normalized 0..1 rectangle drawn on a sample + OCR hint. NULL ZoneX = no zone.
+    ZonePage       INT                  NULL,
+    ZoneX          DECIMAL(9,6)         NULL,
+    ZoneY          DECIMAL(9,6)         NULL,
+    ZoneW          DECIMAL(9,6)         NULL,
+    ZoneH          DECIMAL(9,6)         NULL,
+    ZoneOcrHint    VARCHAR(20)          NULL,       -- TEXT, NUMERIC, DATE, INT
+    ZonePsm        TINYINT              NULL,       -- optional PageSegMode override
     ZonePageRole   VARCHAR(12)          NULL,       -- FIRST|CONTINUATION|LAST|ANY (multi-page; NULL=ANY)
     CONSTRAINT FK_MappingField_Template FOREIGN KEY (TemplateId) REFERENCES dbo.MappingTemplate(TemplateId)
 );

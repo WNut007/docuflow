@@ -20,6 +20,7 @@ public sealed class PipelineService(
     IMappingRepository mappingRepo,
     ExtractionService extraction,
     MappingEngine mappingEngine,
+    OcrPipeline.Web.Services.Zonal.ZonalExtractionService zonal,
     ILogger<PipelineService> logger) : IPipelineRunner
 {
     public async Task ProcessAsync(long documentId, int? byUserId, CancellationToken ct = default)
@@ -35,7 +36,26 @@ public sealed class PipelineService(
             documents.SetClassification(documentId, classifiedTypeId, 0.92m);
             documents.LogEvent(documentId, "CLASSIFY", "CAPTURED", "CLASSIFIED", "Auto-classified", byUserId);
 
-            // 2) EXTRACT (OCR -> text + tables), then derive flat properties
+            var template = mappingRepo.GetActiveTemplateForType(classifiedTypeId);
+
+            // ZONAL templates skip full-page OCR entirely: OCR only inside each drawn zone, straight
+            // into the field. (No reliance on whatever blocks Tesseract's layout analysis produces.)
+            if (template is not null &&
+                string.Equals(template.MappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                stage = "EXTRACT";
+                var zsteps = mappingRepo.GetTransformerSteps(template.TemplateId);
+                var zoutcome = await zonal.ProcessAsync(doc, template, zsteps, ct);
+                mappingRepo.SaveResult(documentId, zoutcome);
+
+                var znext = zoutcome.NeedsReview ? "NEEDS_REVIEW" : "MAPPED";
+                documents.SetStatus(documentId, znext);
+                documents.LogEvent(documentId, "MAP", "CLASSIFIED", znext,
+                    $"Zonal mapped with confidence {zoutcome.OverallConfidence:P0}", byUserId);
+                return;
+            }
+
+            // 2) EXTRACT (OCR -> text + tables), then derive flat properties  [OCR-first path]
             stage = "EXTRACT";
             long runId = await extraction.ExtractAsync(documentId, doc.StoredPath, doc.ContentType, doc.OcrLanguages, ct);
             var ocr = ocrRepo.LoadLatest(documentId);
@@ -45,7 +65,6 @@ public sealed class PipelineService(
 
             // 3) MAP (resolve fields, run transformer pipeline, build target model)
             stage = "MAP";
-            var template = mappingRepo.GetActiveTemplateForType(classifiedTypeId);
             if (template is not null && ocr is not null)
             {
                 var steps = mappingRepo.GetTransformerSteps(template.TemplateId);

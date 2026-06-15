@@ -29,6 +29,12 @@ public interface IMappingRepository
     /// </summary>
     int UpsertFieldBinding(int templateId, MappingField field, bool bindingChanged);
 
+    /// <summary>
+    /// Saves the zone designer: sets the template's MappingMode and upserts each field's zone
+    /// rectangle + OCR hint (insert when FieldId == 0). Used by the zonal (template-based) mapper.
+    /// </summary>
+    void SaveZones(int templateId, string mappingMode, IEnumerable<MappingField> fields);
+
     long SaveResult(long documentId, MappingOutcome outcome);
     (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long documentId);
     int UpdateResultValue(long documentId, long resultValueId, string? normalizedValue);

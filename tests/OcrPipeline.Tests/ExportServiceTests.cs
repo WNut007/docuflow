@@ -46,6 +46,7 @@ public sealed class ExportServiceTests
         public IReadOnlyList<string> GetPropertyKeysForType(int t) => throw new NotSupportedException();
         public void SaveFields(int t, IEnumerable<MappingField> f, IReadOnlyDictionary<int, List<TransformerStep>> s) => throw new NotSupportedException();
         public int UpsertFieldBinding(int t, MappingField f, bool b) => throw new NotSupportedException();
+        public void SaveZones(int t, string mappingMode, IEnumerable<MappingField> f) => throw new NotSupportedException();
         public long SaveResult(long d, MappingOutcome o) => throw new NotSupportedException();
         public int UpdateResultValue(long d, long rv, string? n) => throw new NotSupportedException();
     }

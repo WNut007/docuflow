@@ -29,7 +29,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         using var db = factory.Create();
         const string sql = """
             SELECT c.ColumnId, c.FieldId, c.TargetSubProperty, c.DataType, c.TableHeader,
-                   c.SortOrder, c.IsActive
+                   c.SortOrder, c.IsActive,
+                   c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
             FROM dbo.MappingTableColumn c
             JOIN dbo.MappingField f ON f.FieldId = c.FieldId
             WHERE f.TemplateId = @TemplateId AND c.IsActive = 1
@@ -49,8 +50,12 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         db.Execute("DELETE FROM dbo.MappingTableColumn WHERE FieldId = @FieldId;", new { FieldId = fieldId }, tx);
 
         const string insertSql = """
-            INSERT dbo.MappingTableColumn (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive)
-            VALUES (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive);
+            INSERT dbo.MappingTableColumn
+                (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive,
+                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator)
+            VALUES
+                (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive,
+                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator);
             """;
         int order = 0;
         foreach (var c in columns)
@@ -62,7 +67,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
                 c.DataType,
                 c.TableHeader,
                 SortOrder = c.SortOrder == 0 ? order : c.SortOrder,
-                c.IsActive
+                c.IsActive,
+                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
             }, tx);
             order++;
         }
@@ -75,7 +81,7 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         using var db = factory.Create();
 
         const string tplSql = """
-            SELECT TOP 1 TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive
+            SELECT TOP 1 TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive, MappingMode
             FROM dbo.MappingTemplate
             WHERE DocumentTypeId = @DocumentTypeId AND IsActive = 1
             ORDER BY Version DESC;
@@ -85,7 +91,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
 
         const string fieldSql = """
             SELECT FieldId, TemplateId, TargetProperty, DataType, IsRequired, SourceType,
-                   KeyPattern, SourcePattern, TableHeader, RowSelector, DefaultValue, MinConfidence
+                   KeyPattern, SourcePattern, TableHeader, RowSelector, DefaultValue, MinConfidence,
+                   ZonePage, ZoneX, ZoneY, ZoneW, ZoneH, ZoneOcrHint, ZonePsm, ZonePageRole
             FROM dbo.MappingField
             WHERE TemplateId = @TemplateId;
             """;
@@ -120,7 +127,7 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
     {
         using var db = factory.Create();
         const string tplSql = """
-            SELECT TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive
+            SELECT TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive, MappingMode
             FROM dbo.MappingTemplate WHERE TemplateId = @TemplateId;
             """;
         var tpl = db.QuerySingleOrDefault<MappingTemplate>(tplSql, new { TemplateId = templateId });
@@ -128,7 +135,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
 
         const string fieldSql = """
             SELECT FieldId, TemplateId, TargetProperty, DataType, IsRequired, SourceType,
-                   KeyPattern, SourcePattern, TableHeader, RowSelector, DefaultValue, MinConfidence
+                   KeyPattern, SourcePattern, TableHeader, RowSelector, DefaultValue, MinConfidence,
+                   ZonePage, ZoneX, ZoneY, ZoneW, ZoneH, ZoneOcrHint, ZonePsm, ZonePageRole
             FROM dbo.MappingField WHERE TemplateId = @TemplateId ORDER BY FieldId;
             """;
         tpl.Fields = db.Query<MappingField>(fieldSql, new { TemplateId = templateId }).ToList();
@@ -206,6 +214,46 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
                     }, tx);
             }
             rowIndex++;
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Saves the zone designer: sets the template MappingMode, then upserts each field's zone
+    /// rectangle + OCR hint in one transaction (insert when FieldId == 0). Parameterized throughout.
+    /// </summary>
+    public void SaveZones(int templateId, string mappingMode, IEnumerable<MappingField> fields)
+    {
+        using var db = factory.Create();
+        using var tx = db.BeginTransaction();
+
+        db.Execute(
+            "UPDATE dbo.MappingTemplate SET MappingMode = @MappingMode WHERE TemplateId = @TemplateId;",
+            new { TemplateId = templateId, MappingMode = mappingMode }, tx);
+
+        const string insertSql = """
+            INSERT dbo.MappingField
+                (TemplateId, TargetProperty, DataType, IsRequired, SourceType, MinConfidence,
+                 ZonePage, ZoneX, ZoneY, ZoneW, ZoneH, ZoneOcrHint, ZonePsm, ZonePageRole)
+            VALUES
+                (@TemplateId, @TargetProperty, @DataType, @IsRequired, @SourceType, @MinConfidence,
+                 @ZonePage, @ZoneX, @ZoneY, @ZoneW, @ZoneH, @ZoneOcrHint, @ZonePsm, @ZonePageRole);
+            """;
+        const string updateSql = """
+            UPDATE dbo.MappingField SET
+                TargetProperty = @TargetProperty, DataType = @DataType, IsRequired = @IsRequired,
+                MinConfidence = @MinConfidence,
+                ZonePage = @ZonePage, ZoneX = @ZoneX, ZoneY = @ZoneY, ZoneW = @ZoneW, ZoneH = @ZoneH,
+                ZoneOcrHint = @ZoneOcrHint, ZonePsm = @ZonePsm, ZonePageRole = @ZonePageRole
+            WHERE FieldId = @FieldId AND TemplateId = @TemplateId;
+            """;
+
+        foreach (var f in fields)
+        {
+            f.TemplateId = templateId;
+            if (string.IsNullOrWhiteSpace(f.SourceType)) f.SourceType = "KEY_VALUE";
+            db.Execute(f.FieldId > 0 ? updateSql : insertSql, f, tx);
         }
 
         tx.Commit();

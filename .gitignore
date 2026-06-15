@@ -8,6 +8,9 @@
 # Runtime / uploaded files
 src/OcrPipeline.Web/App_Data/uploads/
 
+# Tesseract language models (~22MB each) — install locally, never commit. See README.
+tessdata/
+
 # Local config that may carry secrets
 appsettings.*.local.json
 

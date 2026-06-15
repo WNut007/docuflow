@@ -19,11 +19,34 @@ namespace OcrPipeline.Web.Services.Ocr;
 public sealed class TesseractOcrEngine(
     IOptions<TesseractOptions> options,
     ImagePreprocessor preprocessor,
-    TextNormalizer normalizer) : IOcrEngine
+    TextNormalizer normalizer) : IOcrEngine, IRegionOcrEngine
 {
     private readonly TesseractOptions _o = options.Value;
 
     public string Name => "Tesseract";
+
+    /// <summary>
+    /// Zonal OCR: read one already-cropped region with a tight PageSegMode and optional character
+    /// whitelist. No preprocessing/layout analysis here — the caller has cropped (and upscaled) the
+    /// zone; the human supplied the layout. Reuses the effective-language fallback + tessdata check.
+    /// </summary>
+    public Task<(string Text, decimal Confidence)> OcrRegionAsync(
+        string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default)
+    {
+        string langs = string.IsNullOrWhiteSpace(languages) ? _o.Languages : languages.Trim();
+        string tessdata = ResolveTessdataOrThrow(langs);
+
+        using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
+        if (!string.IsNullOrEmpty(whitelist))
+            engine.SetVariable("tessedit_char_whitelist", whitelist);
+
+        using var pix = Pix.LoadFromFile(imagePath);
+        using var page = engine.Process(pix, (PageSegMode)psm);
+
+        string text = (page.GetText() ?? "").Trim();
+        decimal conf = (decimal)(page.GetMeanConfidence()); // 0..1
+        return Task.FromResult((text, conf));
+    }
 
     public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)
     {

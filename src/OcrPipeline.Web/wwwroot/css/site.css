@@ -26,3 +26,16 @@
 .vm-chip { position: absolute; left: 0; bottom: 100%; font-size: .65rem; line-height: 1.1;
            padding: 0 .25rem; border-radius: .2rem; white-space: nowrap; max-width: 240px;
            overflow: hidden; text-overflow: ellipsis; }
+
+/* Zone designer (zonal / template-based OCR) */
+.zone-stage { cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.zone-box { position: absolute; border: 2px solid rgba(13,110,253,.8); background: rgba(13,110,253,.10);
+            cursor: move; box-sizing: border-box; }
+.zone-box.zone-armed { border-color: rgba(255,193,7,.95); background: rgba(255,193,7,.14); }
+.zone-label { position: absolute; left: 0; bottom: 100%; font-size: .62rem; line-height: 1.2;
+              padding: 0 .25rem; background: rgba(13,110,253,.85); color: #fff; border-radius: .2rem .2rem 0 0;
+              white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.zone-armed .zone-label { background: rgba(255,170,0,.95); color: #000; }
+.zone-handle { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px;
+               background: #fff; border: 2px solid rgba(13,110,253,.9); border-radius: 2px; cursor: nwse-resize; }
+.zone-field-armed { outline: 2px solid var(--bs-warning); }

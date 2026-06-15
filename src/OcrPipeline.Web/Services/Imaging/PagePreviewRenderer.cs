@@ -36,6 +36,29 @@ public sealed class PagePreviewRenderer
         => contentType?.Contains("pdf", StringComparison.OrdinalIgnoreCase) == true ||
            Path.GetExtension(path).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Resolves a full-resolution raster for ONE page to crop zones from, without touching the
+    /// canonical previews. Raster images return their original path (already full-res, no temp);
+    /// PDFs render the single page to a temp PNG at <paramref name="dpi"/> (caller deletes it).
+    /// </summary>
+    public (string Path, bool IsTemp) RenderForCrop(string storedPath, string? contentType, int pageNumber, int dpi = 300)
+    {
+        if (!IsPdf(storedPath, contentType)) return (storedPath, false);
+
+        double scaling = (double)dpi / PdfPointsPerInch;
+        using var docReader = DocLib.Instance.GetDocReader(storedPath, new PageDimensions(scaling));
+        using var pageReader = docReader.GetPageReader(Math.Max(0, pageNumber - 1));
+        int width = pageReader.GetPageWidth();
+        int height = pageReader.GetPageHeight();
+        byte[] bgra = pageReader.GetImage();
+
+        using var image = Image.LoadPixelData<Bgra32>(bgra, width, height);
+        image.Mutate(c => c.BackgroundColor(Color.White));
+        string temp = Path.Combine(Path.GetTempPath(), $"docuflow_pdfpage_{Guid.NewGuid():N}.png");
+        image.SaveAsPng(temp);
+        return (temp, true);
+    }
+
     private static List<RenderedPage> RenderImage(string storedPath)
     {
         using var image = Image.Load<Rgba32>(storedPath);

@@ -101,6 +101,75 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         return outcome;
     }
 
+    /// <summary>
+    /// Zonal (template-based) mapping. Each scalar field's value comes straight from OCR of its drawn
+    /// zone (<paramref name="zoneResults"/>: fieldId -> raw text + confidence). Reuses the SAME
+    /// normalize / transformer / threshold / NeedsReview machinery as <see cref="RunAsync"/> so there is
+    /// one mapping path for both modes. TABLE_CELL fields are emitted empty here (table zones = Phase 2).
+    /// </summary>
+    public async Task<MappingOutcome> RunZonalAsync(
+        MappingTemplate template,
+        IReadOnlyDictionary<int, (string Raw, decimal Conf)> zoneResults,
+        IReadOnlyDictionary<int, List<TransformerStep>> stepsByField,
+        CancellationToken ct = default)
+    {
+        // Infer day/month order from the zone values themselves (e.g. a due date 26/02 proves day-first).
+        var dateOrder = normalizer.InferDayMonthOrder(zoneResults.Values.Select(v => v.Raw));
+        var outcome = new MappingOutcome { TemplateId = template.TemplateId, TargetModel = template.TargetModel };
+
+        var model = new Dictionary<string, object?>();
+        var confidences = new List<decimal>();
+
+        // transformer context: zone values keyed by target property, plus their concatenation
+        var allProps = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in template.Fields)
+            if (zoneResults.TryGetValue(f.FieldId, out var zr)) allProps[f.TargetProperty] = zr.Raw;
+        var fullText = string.Join('\n', zoneResults.Values.Select(v => v.Raw));
+
+        foreach (var field in template.Fields)
+        {
+            var mv = new MappedValue { FieldId = field.FieldId, TargetProperty = field.TargetProperty };
+
+            if (zoneResults.TryGetValue(field.FieldId, out var zr) &&
+                !string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase))
+            {
+                mv.RawValue = zr.Raw;
+                mv.NormalizedValue = NormalizeSingle(field.DataType, zr.Raw, dateOrder);
+                mv.Confidence = zr.Conf;
+                mv.SourceRef = "Zone";
+
+                if (stepsByField.TryGetValue(field.FieldId, out var steps) && steps.Count > 0)
+                {
+                    var tctx = new TransformContext(field.TargetProperty, allProps, fullText);
+                    mv.NormalizedValue = await transformerPipeline.RunAsync(
+                        mv.NormalizedValue ?? mv.RawValue, steps, tctx, ct);
+                }
+            }
+            else
+            {
+                // no zone (or a table field) -> empty value; falls back to the field default
+                mv.NormalizedValue = field.DefaultValue;
+                mv.Confidence = 0m;
+            }
+
+            mv.IsBelowThreshold = mv.Confidence is { } c && c < field.MinConfidence;
+            if (mv.Confidence is { } conf) confidences.Add(conf);
+
+            model[field.TargetProperty] = mv.NormalizedValue;
+            outcome.Values.Add(mv);
+        }
+
+        outcome.OverallConfidence = confidences.Count > 0 ? Math.Round(confidences.Average(), 4) : null;
+        outcome.NeedsReview =
+            outcome.Values.Any(v => v.IsBelowThreshold) ||
+            template.Fields.Where(f => f.IsRequired)
+                           .Any(f => string.IsNullOrWhiteSpace(
+                               outcome.Values.First(v => v.FieldId == f.FieldId).NormalizedValue));
+
+        outcome.MappedJson = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
+        return outcome;
+    }
+
     private static Dictionary<string, string?> BuildProperties(OcrExtraction ex)
     {
         var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
