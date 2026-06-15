@@ -39,3 +39,10 @@
 .zone-handle { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px;
                background: #fff; border: 2px solid rgba(13,110,253,.9); border-radius: 2px; cursor: nwse-resize; }
 .zone-field-armed { outline: 2px solid var(--bs-warning); }
+
+/* Table (line_item) zone + draggable column separators */
+.zone-box.zone-table { border-style: dashed; border-color: rgba(25,135,84,.85); background: rgba(25,135,84,.08); }
+.zone-box.zone-table.zone-armed { border-color: rgba(255,193,7,.95); }
+.zone-sep { position: absolute; top: 0; bottom: 0; width: 0; margin-left: -4px; padding: 0 4px;
+            border-left: 2px solid rgba(25,135,84,.9); cursor: ew-resize; }
+.zone-armed .zone-sep { border-left-color: rgba(255,140,0,.95); }

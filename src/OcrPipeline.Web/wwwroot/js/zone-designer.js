@@ -1,6 +1,7 @@
 // Zone designer (zonal / template-based OCR). Vanilla JS, no framework.
-// LEFT: page image. Pick a field on the RIGHT, then drag a rectangle over its value. Existing zones
-// render via the shared OcrOverlay (percent-positioned); this file adds draw / move / resize.
+// LEFT: page image. Pick a field on the RIGHT, then drag a rectangle over its value. A field can be a
+// scalar zone OR a line_item TABLE: draw the table rect, then drag column separators and map each
+// column to a sub-field (description/qty/unit_price/amount), marking one column as the row ANCHOR.
 (function () {
     "use strict";
 
@@ -22,10 +23,21 @@
         return {
             fieldId: f.fieldId, targetProperty: f.targetProperty || "", dataType: f.dataType || "STRING",
             isRequired: !!f.isRequired, minConfidence: f.minConfidence || 0.6,
+            sourceType: f.sourceType || "KEY_VALUE",
             zonePage: f.zonePage || null,
             zoneX: numOrNull(f.zoneX), zoneY: numOrNull(f.zoneY), zoneW: numOrNull(f.zoneW), zoneH: numOrNull(f.zoneH),
             ocrHint: f.zoneOcrHint || "TEXT", psm: f.zonePsm || null,
+            columns: (f.columns || []).map(normalizeColumn),
             _changed: false
+        };
+    }
+    function normalizeColumn(c) {
+        return {
+            columnId: c.columnId || 0, targetSubProperty: c.targetSubProperty || "", dataType: c.dataType || "STRING",
+            sortOrder: c.sortOrder || 0, isAnchor: !!c.isAnchor,
+            colXStart: numOrNull(c.colXStart), colXEnd: numOrNull(c.colXEnd),
+            lineSelectMode: c.lineSelectMode || "ALL", lineSelectIndices: c.lineSelectIndices || "",
+            lineJoinSeparator: c.lineJoinSeparator == null ? " " : c.lineJoinSeparator
         };
     }
 
@@ -33,6 +45,7 @@
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     function setStatus(t) { $("status").textContent = t || ""; }
     const clamp01 = v => Math.max(0, Math.min(1, v));
+    const isTable = f => f.sourceType === "TABLE_CELL";
 
     // ---- document / image -----------------------------------------------------
     function loadDoc() {
@@ -47,18 +60,39 @@
         $("nextPage").disabled = state.page >= state.pageCount;
     }
 
-    // ---- overlay (existing zones) ---------------------------------------------
+    // ---- columns --------------------------------------------------------------
+    // Columns store page-normalized x-boundaries. Equal-split across the table rect when (re)flowed;
+    // dragging a separator overrides the shared boundary of the two adjacent columns.
+    function reflowColumns(f) {
+        if (f.zoneX == null || f.columns.length === 0) return;
+        const n = f.columns.length, w = f.zoneW / n;
+        f.columns.forEach((c, i) => { c.colXStart = f.zoneX + i * w; c.colXEnd = f.zoneX + (i + 1) * w; c.sortOrder = i; });
+    }
+    function addColumn(f) {
+        f.columns.push(normalizeColumn({ targetSubProperty: "", dataType: "STRING" }));
+        if (!f.columns.some(c => c.isAnchor)) f.columns[0].isAnchor = true;
+        reflowColumns(f); f._changed = true; renderFields(); renderOverlay();
+    }
+    function removeColumn(f, idx) {
+        f.columns.splice(idx, 1);
+        if (f.columns.length && !f.columns.some(c => c.isAnchor)) f.columns[0].isAnchor = true;
+        reflowColumns(f); f._changed = true; renderFields(); renderOverlay();
+    }
+
+    // ---- overlay (existing zones + table separators) --------------------------
     function renderOverlay() {
         const specs = [];
         state.fields.forEach((f, idx) => {
             if (f.zoneX == null || (f.zonePage || 1) !== state.page) return;
+            const armed = idx === state.armed;
             specs.push({
                 bbox: { left: f.zoneX, top: f.zoneY, width: f.zoneW, height: f.zoneH },
-                className: "zone-box" + (idx === state.armed ? " zone-armed" : ""),
+                className: "zone-box" + (armed ? " zone-armed" : "") + (isTable(f) ? " zone-table" : ""),
                 title: f.targetProperty,
                 build: d => {
                     d.dataset.fieldIdx = idx;
-                    d.appendChild(el("span", "zone-label", f.targetProperty || "(field)"));
+                    d.appendChild(el("span", "zone-label", (isTable(f) ? "▦ " : "") + (f.targetProperty || "(field)")));
+                    if (isTable(f) && armed) buildSeparators(d, f, idx);
                     const h = el("span", "zone-handle"); h.dataset.handle = "1"; d.appendChild(h);
                 }
             });
@@ -66,7 +100,21 @@
         OcrOverlay.render($("overlay"), specs);
     }
 
-    // ---- draw / move / resize -------------------------------------------------
+    // internal column separators rendered inside the table box (percent of the box width)
+    function buildSeparators(boxEl, f, fieldIdx) {
+        if (f.zoneW <= 0) return;
+        for (let i = 0; i < f.columns.length - 1; i++) {
+            const pageX = f.columns[i].colXEnd;
+            if (pageX == null) continue;
+            const sep = el("span", "zone-sep");
+            sep.style.left = clamp01((pageX - f.zoneX) / f.zoneW) * 100 + "%";
+            sep.dataset.sep = String(i);
+            sep.dataset.fieldIdx = String(fieldIdx);
+            boxEl.appendChild(sep);
+        }
+    }
+
+    // ---- draw / move / resize / separator drag --------------------------------
     const overlay = $("overlay");
     let drag = null;
 
@@ -80,7 +128,10 @@
     overlay.addEventListener("mousedown", e => {
         const p = normPoint(e);
         const boxEl = e.target.closest("[data-field-idx]");
-        if (e.target.dataset && e.target.dataset.handle && boxEl) {
+        if (e.target.dataset && e.target.dataset.sep !== undefined) {       // drag a column separator
+            const idx = Number(e.target.dataset.fieldIdx);
+            drag = { mode: "sep", idx, sep: Number(e.target.dataset.sep) }; arm(idx);
+        } else if (e.target.dataset && e.target.dataset.handle && boxEl) {
             const idx = Number(boxEl.dataset.fieldIdx);
             drag = { mode: "resize", idx, sx: p.x, sy: p.y, orig: zoneOf(idx) }; arm(idx);
         } else if (boxEl) {
@@ -105,11 +156,17 @@
             f.zoneX = Math.min(clamp01(drag.orig.x + (p.x - drag.sx)), 1 - drag.orig.w);
             f.zoneY = Math.min(clamp01(drag.orig.y + (p.y - drag.sy)), 1 - drag.orig.h);
             f.zoneW = drag.orig.w; f.zoneH = drag.orig.h;
+            if (isTable(f)) reflowColumns(f);
         } else if (drag.mode === "resize") {
             f.zoneW = Math.max(0.005, drag.orig.w + (p.x - drag.sx));
             f.zoneH = Math.max(0.005, drag.orig.h + (p.y - drag.sy));
             if (f.zoneX + f.zoneW > 1) f.zoneW = 1 - f.zoneX;
             if (f.zoneY + f.zoneH > 1) f.zoneH = 1 - f.zoneY;
+            if (isTable(f)) reflowColumns(f);
+        } else if (drag.mode === "sep") {
+            const lo = f.columns[drag.sep].colXStart, hi = f.columns[drag.sep + 1].colXEnd;
+            const x = Math.max(lo + 0.005, Math.min(hi - 0.005, p.x));     // clamp between neighbours
+            f.columns[drag.sep].colXEnd = x; f.columns[drag.sep + 1].colXStart = x;
         }
         renderOverlay();
     });
@@ -119,7 +176,11 @@
         const f = state.fields[drag.idx];
         if (drag.mode === "draw" && (f.zoneW < 0.01 || f.zoneH < 0.01)) {
             f.zoneX = f.zoneY = f.zoneW = f.zoneH = null;   // discard accidental click
-        } else { f._changed = true; setStatus(`Zone set for ${f.targetProperty || "field"} — remember to Save.`); }
+        } else {
+            f._changed = true;
+            if (drag.mode === "draw" && isTable(f)) reflowColumns(f);
+            setStatus(`Zone set for ${f.targetProperty || "field"} — remember to Save.`);
+        }
         drag = null; renderOverlay(); renderFields();
     });
 
@@ -135,34 +196,85 @@
             const head = el("div", "d-flex gap-2 align-items-center");
             const name = el("input", "form-control form-control-sm"); name.value = f.targetProperty; name.placeholder = "target property";
             name.addEventListener("input", () => { f.targetProperty = name.value; f._changed = true; });
-            const dt = el("select", "form-select form-select-sm"); dt.style.maxWidth = "100px";
-            ["STRING", "DECIMAL", "DATE", "INT", "BOOL"].forEach(o => { const op = el("option", null, o); op.selected = f.dataType === o; dt.appendChild(op); });
-            dt.addEventListener("change", () => { f.dataType = dt.value; f._changed = true; });
             const armBtn = el("button", "btn btn-sm " + (idx === state.armed ? "btn-warning" : "btn-outline-primary"), "Draw");
             armBtn.type = "button"; armBtn.addEventListener("click", () => arm(idx));
-            head.append(name, dt, armBtn);
+            head.append(name, armBtn);
+            body.appendChild(head);
 
-            const tools = el("div", "d-flex gap-2 align-items-center mt-1");
-            tools.appendChild(el("span", "small text-body-secondary", "OCR"));
-            const hint = el("select", "form-select form-select-sm"); hint.style.maxWidth = "130px";
-            [["TEXT", "Text"], ["NUMERIC", "Numeric"], ["DATE", "Date"], ["INT", "Integer"]].forEach(([v, t]) => {
-                const op = el("option", null, t); op.value = v; op.selected = (f.ocrHint || "TEXT") === v; hint.appendChild(op);
+            // field-type toggle: scalar zone vs line_item table
+            const typeRow = el("div", "d-flex gap-2 align-items-center mt-1");
+            const tableToggle = el("div", "form-check form-check-inline m-0");
+            const tcb = el("input", "form-check-input"); tcb.type = "checkbox"; tcb.id = `tbl-${idx}`; tcb.checked = isTable(f);
+            tcb.addEventListener("change", () => {
+                f.sourceType = tcb.checked ? "TABLE_CELL" : "KEY_VALUE";
+                if (tcb.checked && f.columns.length === 0)
+                    ["description", "qty", "unit_price", "amount"].forEach(n =>
+                        f.columns.push(normalizeColumn({ targetSubProperty: n, dataType: n === "description" ? "STRING" : (n === "qty" ? "INT" : "DECIMAL") })));
+                if (tcb.checked && !f.columns.some(c => c.isAnchor)) (f.columns.find(c => c.targetSubProperty === "qty") || f.columns[0]).isAnchor = true;
+                if (tcb.checked) reflowColumns(f);
+                f._changed = true; renderFields(); renderOverlay();
             });
-            hint.addEventListener("change", () => { f.ocrHint = hint.value; f._changed = true; });
-            tools.appendChild(hint);
+            const tlbl = el("label", "form-check-label small", "Table (line items)"); tlbl.htmlFor = tcb.id;
+            tableToggle.append(tcb, tlbl);
+            typeRow.appendChild(tableToggle);
+            body.appendChild(typeRow);
 
+            if (isTable(f)) {
+                body.appendChild(buildColumnEditor(f, idx));
+            } else {
+                const tools = el("div", "d-flex gap-2 align-items-center mt-1");
+                tools.appendChild(el("span", "small text-body-secondary", "OCR"));
+                const hint = el("select", "form-select form-select-sm"); hint.style.maxWidth = "130px";
+                [["TEXT", "Text"], ["NUMERIC", "Numeric"], ["DATE", "Date"], ["INT", "Integer"]].forEach(([v, t]) => {
+                    const op = el("option", null, t); op.value = v; op.selected = (f.ocrHint || "TEXT") === v; hint.appendChild(op);
+                });
+                hint.addEventListener("change", () => { f.ocrHint = hint.value; f._changed = true; });
+                const dt = el("select", "form-select form-select-sm"); dt.style.maxWidth = "110px";
+                ["STRING", "DECIMAL", "DATE", "INT", "BOOL"].forEach(o => { const op = el("option", null, o); op.selected = f.dataType === o; dt.appendChild(op); });
+                dt.addEventListener("change", () => { f.dataType = dt.value; f._changed = true; });
+                tools.append(hint, dt);
+                body.appendChild(tools);
+            }
+
+            const zoneRow = el("div", "d-flex gap-2 align-items-center mt-1");
             if (f.zoneX != null) {
-                tools.appendChild(el("span", "badge text-bg-success", "zone p" + (f.zonePage || 1)));
+                zoneRow.appendChild(el("span", "badge text-bg-success", "zone p" + (f.zonePage || 1)));
                 const clr = el("button", "btn btn-sm btn-outline-danger py-0 ms-auto"); clr.type = "button";
                 clr.appendChild(el("i", "bi bi-x"));
                 clr.addEventListener("click", () => { f.zoneX = f.zoneY = f.zoneW = f.zoneH = null; f._changed = true; renderFields(); renderOverlay(); });
-                tools.appendChild(clr);
+                zoneRow.appendChild(clr);
             } else {
-                tools.appendChild(el("span", "badge text-bg-secondary ms-auto", "no zone"));
+                zoneRow.appendChild(el("span", "badge text-bg-secondary ms-auto", "no zone"));
             }
+            body.appendChild(zoneRow);
 
-            body.append(head, tools); card.appendChild(body); pane.appendChild(card);
+            card.appendChild(body); pane.appendChild(card);
         });
+    }
+
+    function buildColumnEditor(f, fieldIdx) {
+        const wrap = el("div", "mt-2 border-top pt-2");
+        wrap.appendChild(el("div", "small text-body-secondary mb-1", "Columns — ⚓ marks the anchor (one value per row); drag separators on the table to set widths"));
+        f.columns.forEach((c, ci) => {
+            const row = el("div", "d-flex gap-1 align-items-center mb-1");
+            const cn = el("input", "form-control form-control-sm"); cn.value = c.targetSubProperty; cn.placeholder = "sub-field"; cn.style.maxWidth = "130px";
+            cn.addEventListener("input", () => { c.targetSubProperty = cn.value; f._changed = true; });
+            const ct = el("select", "form-select form-select-sm"); ct.style.maxWidth = "100px";
+            ["STRING", "DECIMAL", "INT", "DATE"].forEach(o => { const op = el("option", null, o); op.selected = c.dataType === o; ct.appendChild(op); });
+            ct.addEventListener("change", () => { c.dataType = ct.value; f._changed = true; });
+            const anchor = el("div", "form-check form-check-inline m-0");
+            const ar = el("input", "form-check-input"); ar.type = "radio"; ar.name = `anchor-${fieldIdx}`; ar.checked = c.isAnchor; ar.title = "anchor column (one value per row)";
+            ar.addEventListener("change", () => { f.columns.forEach(x => x.isAnchor = false); c.isAnchor = true; f._changed = true; });
+            anchor.append(ar, el("label", "form-check-label small", "⚓"));
+            const rm = el("button", "btn btn-sm btn-outline-danger py-0"); rm.type = "button"; rm.appendChild(el("i", "bi bi-x"));
+            rm.addEventListener("click", () => removeColumn(f, ci));
+            row.append(cn, ct, anchor, rm);
+            wrap.appendChild(row);
+        });
+        const add = el("button", "btn btn-sm btn-outline-secondary py-0", "+ column"); add.type = "button";
+        add.addEventListener("click", () => addColumn(f));
+        wrap.appendChild(add);
+        return wrap;
     }
 
     // ---- save -----------------------------------------------------------------
@@ -175,8 +287,17 @@
                 .map(f => ({
                     fieldId: f.fieldId, targetProperty: f.targetProperty, dataType: f.dataType,
                     isRequired: !!f.isRequired, minConfidence: f.minConfidence || 0.6,
+                    sourceType: f.sourceType || "KEY_VALUE",
                     zonePage: f.zonePage || 1, zoneX: f.zoneX, zoneY: f.zoneY, zoneW: f.zoneW, zoneH: f.zoneH,
-                    zoneOcrHint: f.ocrHint || "TEXT", zonePsm: f.psm || null
+                    zoneOcrHint: f.ocrHint || "TEXT", zonePsm: f.psm || null,
+                    columns: isTable(f) ? f.columns
+                        .filter(c => (c.targetSubProperty || "").trim().length > 0)
+                        .map((c, i) => ({
+                            columnId: c.columnId || 0, targetSubProperty: c.targetSubProperty, dataType: c.dataType,
+                            sortOrder: i, colXStart: c.colXStart, colXEnd: c.colXEnd, isAnchor: !!c.isAnchor,
+                            lineSelectMode: c.lineSelectMode || "ALL", lineSelectIndices: c.lineSelectIndices || "",
+                            lineJoinSeparator: c.lineJoinSeparator == null ? " " : c.lineJoinSeparator
+                        })) : []
                 }))
         };
         if (state.mappingMode === "ZONAL" && payload.fields.length === 0) {
@@ -200,7 +321,7 @@
     $("nextPage").addEventListener("click", () => { if (state.page < state.pageCount) { state.page++; loadDoc(); } });
     $("filter").addEventListener("input", renderFields);
     $("addField").addEventListener("click", () => {
-        state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, minConfidence: 0.6, zonePage: null, zoneX: null, zoneY: null, zoneW: null, zoneH: null, ocrHint: "TEXT", psm: null, _changed: true });
+        state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, minConfidence: 0.6, sourceType: "KEY_VALUE", zonePage: null, zoneX: null, zoneY: null, zoneW: null, zoneH: null, ocrHint: "TEXT", psm: null, columns: [], _changed: true });
         state.armed = state.fields.length - 1; renderFields();
     });
     $("saveBtn").addEventListener("click", save);
