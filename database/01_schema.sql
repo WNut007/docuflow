@@ -86,6 +86,7 @@ CREATE TABLE dbo.Document (
     StatusCode       VARCHAR(20)          NOT NULL CONSTRAINT DF_Document_Status DEFAULT('CAPTURED'),
     PageCount        INT                  NOT NULL CONSTRAINT DF_Document_Pages DEFAULT(0),
     UploadedByUserId INT                  NULL,
+    OcrLanguages     VARCHAR(50)          NULL,        -- per-document OCR language override (e.g. 'eng'); NULL = configured default
     CreatedAtUtc     DATETIME2(3)         NOT NULL CONSTRAINT DF_Document_Created DEFAULT(SYSUTCDATETIME()),
     UpdatedAtUtc     DATETIME2(3)         NULL,
     CONSTRAINT FK_Document_Type   FOREIGN KEY (DocumentTypeId)  REFERENCES dbo.DocumentType(DocumentTypeId),

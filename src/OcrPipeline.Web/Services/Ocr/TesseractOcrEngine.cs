@@ -25,7 +25,7 @@ public sealed class TesseractOcrEngine(
 
     public string Name => "Tesseract";
 
-    public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, CancellationToken ct = default)
+    public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)
     {
         // Tesseract reads raster images. PDF rasterization to per-page PNG arrives in Prompt 2.
         if (IsPdf(filePath, contentType))
@@ -33,17 +33,19 @@ public sealed class TesseractOcrEngine(
                 "TesseractOcrEngine needs a rasterized image (PNG/JPG/TIFF). PDF rasterization is added in Prompt 2; " +
                 "use the Google Document AI engine for PDFs in the meantime.");
 
-        string tessdata = ResolveTessdataOrThrow();
+        // Per-document language override (e.g. "eng" for a Latin-only invoice) falls back to config default.
+        string langs = string.IsNullOrWhiteSpace(languages) ? _o.Languages : languages.Trim();
+        string tessdata = ResolveTessdataOrThrow(langs);
 
-        // preprocess to a temporary PNG (grayscale, >=300 DPI, deskew, denoise)
+        // preprocess to a temporary PNG (grayscale, ensure DPI / min OCR width, deskew, denoise)
         string prepped = Path.Combine(Path.GetTempPath(), $"docuflow_{Guid.NewGuid():N}.png");
         try
         {
-            preprocessor.Process(filePath, prepped, _o.Dpi);
+            preprocessor.Process(filePath, prepped, _o.Dpi, _o.MinOcrWidth);
 
             var ex = new OcrExtraction { Engine = Name, EngineVersion = "tesseract-5/lstm", PageCount = 1 };
 
-            using var engine = new TesseractEngine(tessdata, _o.Languages, EngineMode.LstmOnly);
+            using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
             using var pix = Pix.LoadFromFile(prepped);
             using var page = engine.Process(pix);
 
@@ -87,7 +89,7 @@ public sealed class TesseractOcrEngine(
             ex.RawJson = JsonSerializer.Serialize(new
             {
                 engine = "tesseract",
-                languages = _o.Languages,
+                languages = langs,
                 meanConfidence = page.GetMeanConfidence()
             });
             return Task.FromResult(ex);
@@ -104,8 +106,8 @@ public sealed class TesseractOcrEngine(
         => contentType?.Contains("pdf", StringComparison.OrdinalIgnoreCase) == true ||
            Path.GetExtension(path).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Resolves the tessdata folder and verifies each configured language is present.</summary>
-    private string ResolveTessdataOrThrow()
+    /// <summary>Resolves the tessdata folder and verifies each requested language is present.</summary>
+    private string ResolveTessdataOrThrow(string languages)
     {
         string path = Path.IsPathRooted(_o.TessdataPath)
             ? _o.TessdataPath
@@ -116,7 +118,7 @@ public sealed class TesseractOcrEngine(
                 $"Tesseract tessdata folder not found at '{path}'. Set Ocr:Tesseract:TessdataPath and install " +
                 "tha.traineddata + eng.traineddata (LSTM 'best' models). See README \"Tesseract offline OCR setup\".");
 
-        foreach (var lang in _o.Languages.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var lang in languages.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (!File.Exists(Path.Combine(path, $"{lang}.traineddata")))
                 throw new FileNotFoundException(

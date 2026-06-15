@@ -8,9 +8,9 @@ public sealed class ExtractionService(
     IOcrEngine ocrEngine,
     OcrRepository ocrRepo)
 {
-    public async Task<long> ExtractAsync(long documentId, string filePath, string contentType, CancellationToken ct = default)
+    public async Task<long> ExtractAsync(long documentId, string filePath, string contentType, string? languages = null, CancellationToken ct = default)
     {
-        var extraction = await ocrEngine.ExtractAsync(filePath, contentType, ct);
+        var extraction = await ocrEngine.ExtractAsync(filePath, contentType, languages, ct);
         return ocrRepo.SaveExtraction(documentId, extraction);
     }
 

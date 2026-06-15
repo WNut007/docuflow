@@ -24,6 +24,8 @@ public sealed class Document
     public string StatusCode { get; set; } = "CAPTURED";
     public int PageCount { get; set; }
     public int? UploadedByUserId { get; set; }
+    /// <summary>Optional per-document Tesseract language override (e.g. "eng" or "tha+eng"); null = configured default.</summary>
+    public string? OcrLanguages { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
 

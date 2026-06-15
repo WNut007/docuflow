@@ -37,7 +37,7 @@ public sealed class PipelineService(
 
             // 2) EXTRACT (OCR -> text + tables), then derive flat properties
             stage = "EXTRACT";
-            long runId = await extraction.ExtractAsync(documentId, doc.StoredPath, doc.ContentType, ct);
+            long runId = await extraction.ExtractAsync(documentId, doc.StoredPath, doc.ContentType, doc.OcrLanguages, ct);
             var ocr = ocrRepo.LoadLatest(documentId);
             if (ocr is not null) ocrRepo.SaveProperties(documentId, runId, ocr);
             documents.SetStatus(documentId, "EXTRACTED");

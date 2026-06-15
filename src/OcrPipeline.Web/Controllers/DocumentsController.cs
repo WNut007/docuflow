@@ -35,7 +35,7 @@ public sealed class DocumentsController(
     [HttpPost]
     [ValidateAntiForgeryToken]
     [RequestSizeLimit(50_000_000)]
-    public async Task<IActionResult> Upload(IFormFile file, CancellationToken ct)
+    public async Task<IActionResult> Upload(IFormFile file, string? ocrLanguages, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
         {
@@ -66,7 +66,8 @@ public sealed class DocumentsController(
             Sha256 = sha,
             SourceChannel = "UPLOAD",
             StatusCode = "CAPTURED",
-            UploadedByUserId = userId
+            UploadedByUserId = userId,
+            OcrLanguages = NormalizeOcrLanguages(ocrLanguages)
         };
         var docId = documents.Insert(doc);
         documents.LogEvent(docId, "CAPTURE", null, "CAPTURED", "File uploaded", userId);
@@ -197,4 +198,17 @@ public sealed class DocumentsController(
 
     private int? GetUserId()
         => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+
+    /// <summary>
+    /// Validates the per-document OCR language choice against an allow-list so only known language
+    /// strings ever reach the OCR engine / tessdata lookup. "Auto"/blank/unknown returns null,
+    /// meaning "use the configured default" (Ocr:Tesseract:Languages).
+    /// </summary>
+    private static string? NormalizeOcrLanguages(string? value) => (value ?? "").Trim().ToLowerInvariant() switch
+    {
+        "eng" => "eng",
+        "tha" => "tha",
+        "tha+eng" or "eng+tha" => "tha+eng",
+        _ => null
+    };
 }

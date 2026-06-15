@@ -19,15 +19,15 @@ public sealed class ImagePreprocessor
     /// <summary>
     /// Preprocesses <paramref name="inputPath"/> and writes a PNG to <paramref name="outputPath"/>.
     /// </summary>
-    public void Process(string inputPath, string outputPath, int targetDpi = 300)
+    public void Process(string inputPath, string outputPath, int targetDpi = 300, int minOcrWidth = 0)
     {
         using var image = Image.Load<Rgba32>(inputPath);
 
         // 1) grayscale
         image.Mutate(c => c.Grayscale());
 
-        // 2) ensure >= target DPI (upscale pixels when the stored density is too low)
-        EnsureDpi(image, targetDpi);
+        // 2) ensure >= target DPI, or (when density is unknown) a sensible OCR width
+        EnsureDpi(image, targetDpi, minOcrWidth);
 
         // 3) deskew using a projection-profile angle estimate
         var gray = ToLuminance(image, out int w, out int h);
@@ -46,24 +46,62 @@ public sealed class ImagePreprocessor
     }
 
     // ---- DPI ------------------------------------------------------------------
-    private static void EnsureDpi(Image image, int targetDpi)
+    /// <summary>Largest raster dimension we will ever upscale to — a guard against bogus density
+    /// metadata requesting an enormous buffer (300 DPI on a US-Letter page is ~3300px).</summary>
+    public const int MaxUpscaleDimension = 12_000;
+
+    private static void EnsureDpi(Image image, int targetDpi, int minOcrWidth)
     {
         var md = image.Metadata;
-        double current = md.ResolutionUnits == PixelResolutionUnit.PixelsPerInch
-            ? md.HorizontalResolution
-            : md.HorizontalResolution * 2.54; // PixelsPerCentimeter -> per inch
 
-        if (current >= 1 && current < targetDpi)
+        // Only an ABSOLUTE resolution unit yields a real DPI. A JFIF "aspect ratio" (units=0,
+        // ResolutionUnits=AspectRatio) or any non-physical unit carries NO density — inferring
+        // DPI from it is invalid (a 1:1 aspect ratio would read as 2.54 DPI and trigger a ~118x
+        // upscale into a multi-gigabyte buffer). current = 0 means "density unknown".
+        double current = md.ResolutionUnits switch
         {
-            double scale = targetDpi / current;
-            int nw = Math.Max(1, (int)Math.Round(image.Width * scale));
-            int nh = Math.Max(1, (int)Math.Round(image.Height * scale));
-            image.Mutate(c => c.Resize(nw, nh));
-        }
+            PixelResolutionUnit.PixelsPerInch       => md.HorizontalResolution,
+            PixelResolutionUnit.PixelsPerCentimeter => md.HorizontalResolution * 2.54,
+            PixelResolutionUnit.PixelsPerMeter      => md.HorizontalResolution * 0.0254,
+            _                                       => 0 // AspectRatio / unknown
+        };
+
+        var (nw, nh) = ComputeTargetSize(image.Width, image.Height, current, targetDpi, minOcrWidth, MaxUpscaleDimension);
+        if (nw > image.Width || nh > image.Height)
+            image.Mutate(c => c.Resize(nw, nh, KnownResamplers.Lanczos3)); // Lanczos = crisp text upscale
 
         md.ResolutionUnits = PixelResolutionUnit.PixelsPerInch;
         md.HorizontalResolution = targetDpi;
         md.VerticalResolution = targetDpi;
+    }
+
+    /// <summary>
+    /// Pure resize decision (no ImageSharp types, fully unit-testable). Chooses an upscale factor:
+    /// from real density when known (raise low-DPI scans toward <paramref name="targetDpi"/>), or —
+    /// when density is unknown (<paramref name="currentDpi"/> &lt; 1, e.g. a JFIF aspect-ratio image)
+    /// — raise the width to <paramref name="minOcrWidth"/> so small images become legible to OCR.
+    /// Never downscales; always clamps the largest side to <paramref name="maxDimension"/>.
+    /// </summary>
+    public static (int Width, int Height) ComputeTargetSize(
+        int width, int height, double currentDpi, int targetDpi, int minOcrWidth, int maxDimension)
+    {
+        double scale = 1.0;
+        if (currentDpi >= 1)
+        {
+            if (currentDpi < targetDpi) scale = targetDpi / currentDpi;
+        }
+        else if (minOcrWidth > 0 && width < minOcrWidth)
+        {
+            scale = (double)minOcrWidth / width;
+        }
+
+        if (scale < 1.0) scale = 1.0;                                       // never downscale here
+        double maxScale = (double)maxDimension / Math.Max(width, height);
+        if (scale > maxScale) scale = maxScale;
+
+        int nw = Math.Max(1, (int)Math.Round(width * scale));
+        int nh = Math.Max(1, (int)Math.Round(height * scale));
+        return (nw, nh);
     }
 
     private static void CopyResolution(ImageMetadata from, ImageMetadata to)

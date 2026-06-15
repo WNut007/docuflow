@@ -11,11 +11,11 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         const string sql = """
             INSERT dbo.Document
                 (OriginalFileName, StoredPath, ContentType, FileSizeBytes, Sha256,
-                 SourceChannel, StatusCode, UploadedByUserId)
+                 SourceChannel, StatusCode, UploadedByUserId, OcrLanguages)
             OUTPUT INSERTED.DocumentId
             VALUES
                 (@OriginalFileName, @StoredPath, @ContentType, @FileSizeBytes, @Sha256,
-                 @SourceChannel, @StatusCode, @UploadedByUserId);
+                 @SourceChannel, @StatusCode, @UploadedByUserId, @OcrLanguages);
             """;
         return db.ExecuteScalar<long>(sql, doc);
     }
@@ -26,7 +26,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         const string sql = """
             SELECT DocumentId, OriginalFileName, StoredPath, ContentType, FileSizeBytes,
                    Sha256, SourceChannel, DocumentTypeId, ClassifyConfidence, StatusCode,
-                   PageCount, UploadedByUserId, CreatedAtUtc
+                   PageCount, UploadedByUserId, OcrLanguages, CreatedAtUtc
             FROM dbo.Document
             WHERE DocumentId = @DocumentId;
             """;
@@ -54,7 +54,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         const string sql = """
             SELECT DocumentId, OriginalFileName, StoredPath, ContentType, FileSizeBytes,
                    Sha256, SourceChannel, DocumentTypeId, ClassifyConfidence, StatusCode,
-                   PageCount, UploadedByUserId, CreatedAtUtc
+                   PageCount, UploadedByUserId, OcrLanguages, CreatedAtUtc
             FROM dbo.Document
             WHERE StatusCode = @StatusCode
             ORDER BY DocumentId;

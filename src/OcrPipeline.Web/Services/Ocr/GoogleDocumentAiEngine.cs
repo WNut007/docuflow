@@ -33,7 +33,8 @@ public sealed class GoogleDocumentAiEngine(
 
     public string Name => "GOOGLE_DOCAI";
 
-    public async Task<OcrExtraction> ExtractAsync(string filePath, string contentType, CancellationToken ct = default)
+    // languages: ignored — Document AI auto-detects script (incl. Thai). Present to satisfy IOcrEngine.
+    public async Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)
     {
         int pages = pageCounter.CountPages(filePath, contentType);
 

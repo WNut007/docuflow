@@ -9,6 +9,11 @@ using OcrPipeline.Web.Services.Transform;
 var builder = WebApplication.CreateBuilder(args);
 
 // ---- Configuration --------------------------------------------------------
+// Local-only overrides (gitignored: appsettings.*.local.json) for machine-specific values such as
+// the Tesseract tessdata path or secrets — keeps the committed appsettings.json portable / CI-safe.
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.local.json", optional: true, reloadOnChange: true);
+
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("Missing connection string 'Default'.");
 

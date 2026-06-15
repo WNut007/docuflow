@@ -20,7 +20,7 @@ public sealed class PipelineFailureTests
     private sealed class ThrowingOcrEngine : IOcrEngine
     {
         public string Name => "THROWS";
-        public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, CancellationToken ct = default)
+        public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)
             => throw new DirectoryNotFoundException("tessdata folder not found at 'tessdata'.");
     }
 
