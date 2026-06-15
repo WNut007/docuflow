@@ -45,7 +45,8 @@ public sealed class PipelineService(
             {
                 stage = "EXTRACT";
                 var zsteps = mappingRepo.GetTransformerSteps(template.TemplateId);
-                var zoutcome = await zonal.ProcessAsync(doc, template, zsteps, ct);
+                var zcols = mappingRepo.GetTableColumns(template.TemplateId); // line_item table zones
+                var zoutcome = await zonal.ProcessAsync(doc, template, zsteps, zcols, ct);
                 mappingRepo.SaveResult(documentId, zoutcome);
 
                 var znext = zoutcome.NeedsReview ? "NEEDS_REVIEW" : "MAPPED";

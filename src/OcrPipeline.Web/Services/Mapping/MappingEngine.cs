@@ -105,12 +105,15 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
     /// Zonal (template-based) mapping. Each scalar field's value comes straight from OCR of its drawn
     /// zone (<paramref name="zoneResults"/>: fieldId -> raw text + confidence). Reuses the SAME
     /// normalize / transformer / threshold / NeedsReview machinery as <see cref="RunAsync"/> so there is
-    /// one mapping path for both modes. TABLE_CELL fields are emitted empty here (table zones = Phase 2).
+    /// one mapping path for both modes. TABLE_CELL fields are emitted from <paramref name="tableResults"/>
+    /// (fieldId -> already-segmented typed rows + confidence) as a typed line_item array — the same
+    /// typed-JSON shape as the OCR-first table path; a TABLE_CELL field with no table result stays empty.
     /// </summary>
     public async Task<MappingOutcome> RunZonalAsync(
         MappingTemplate template,
         IReadOnlyDictionary<int, (string Raw, decimal Conf)> zoneResults,
         IReadOnlyDictionary<int, List<TransformerStep>> stepsByField,
+        IReadOnlyDictionary<int, (List<Dictionary<string, object?>> Rows, decimal? Conf)>? tableResults = null,
         CancellationToken ct = default)
     {
         // Infer day/month order from the zone values themselves (e.g. a due date 26/02 proves day-first).
@@ -129,6 +132,24 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         foreach (var field in template.Fields)
         {
             var mv = new MappedValue { FieldId = field.FieldId, TargetProperty = field.TargetProperty };
+
+            // TABLE_CELL field -> typed line_item array from the segmented table result.
+            if (string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)
+                && tableResults is not null && tableResults.TryGetValue(field.FieldId, out var tr))
+            {
+                mv.RawValue = null;
+                mv.NormalizedValue = tr.Rows.Count > 0
+                    ? JsonSerializer.Serialize(tr.Rows)
+                    : null;                               // empty -> null so a required table flags review
+                mv.Confidence = tr.Conf;
+                mv.SourceRef = $"ZoneTable/rows:{tr.Rows.Count}";
+                mv.IsBelowThreshold = tr.Conf is { } tc && tc < field.MinConfidence;
+                if (tr.Conf is { } tconf) confidences.Add(tconf);
+
+                model[field.TargetProperty] = tr.Rows;    // real array -> typed JSON in MappedJson
+                outcome.Values.Add(mv);
+                continue;
+            }
 
             if (zoneResults.TryGetValue(field.FieldId, out var zr) &&
                 !string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase))
@@ -337,8 +358,9 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         return null;
     }
 
-    /// <summary>Normalizes a cell into a typed value per the sub-column's DataType (reuses TextNormalizer).</summary>
-    private object? NormalizeTyped(string dataType, string? raw, DayMonthOrder order)
+    /// <summary>Normalizes a cell into a typed value per the sub-column's DataType (reuses TextNormalizer).
+    /// Public so the zonal table path can type its cells through the SAME single normalization path.</summary>
+    public object? NormalizeTyped(string dataType, string? raw, DayMonthOrder order)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
         switch (dataType?.ToUpperInvariant())

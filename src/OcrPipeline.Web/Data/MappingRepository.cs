@@ -260,6 +260,70 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
     }
 
     /// <summary>
+    /// Upserts a line_item TABLE_CELL field (its zone rect) and replaces its sub-columns in one
+    /// transaction. Insert returns the new FieldId so the columns can be attached. Parameterized.
+    /// </summary>
+    public int SaveTableZone(int templateId, MappingField field, IEnumerable<MappingTableColumn> columns)
+    {
+        using var db = factory.Create();
+        using var tx = db.BeginTransaction();
+
+        field.TemplateId = templateId;
+        field.SourceType = "TABLE_CELL";
+
+        const string insertSql = """
+            INSERT dbo.MappingField
+                (TemplateId, TargetProperty, DataType, IsRequired, SourceType, MinConfidence,
+                 ZonePage, ZoneX, ZoneY, ZoneW, ZoneH, ZoneOcrHint, ZonePsm, ZonePageRole)
+            OUTPUT INSERTED.FieldId
+            VALUES
+                (@TemplateId, @TargetProperty, @DataType, @IsRequired, @SourceType, @MinConfidence,
+                 @ZonePage, @ZoneX, @ZoneY, @ZoneW, @ZoneH, @ZoneOcrHint, @ZonePsm, @ZonePageRole);
+            """;
+        const string updateSql = """
+            UPDATE dbo.MappingField SET
+                TargetProperty = @TargetProperty, DataType = @DataType, IsRequired = @IsRequired,
+                SourceType = @SourceType, MinConfidence = @MinConfidence,
+                ZonePage = @ZonePage, ZoneX = @ZoneX, ZoneY = @ZoneY, ZoneW = @ZoneW, ZoneH = @ZoneH,
+                ZoneOcrHint = @ZoneOcrHint, ZonePsm = @ZonePsm, ZonePageRole = @ZonePageRole
+            WHERE FieldId = @FieldId AND TemplateId = @TemplateId;
+            """;
+
+        int fieldId = field.FieldId;
+        if (fieldId > 0) db.Execute(updateSql, field, tx);
+        else fieldId = db.ExecuteScalar<int>(insertSql, field, tx);
+
+        // replace the field's sub-columns (delete-then-insert) in the SAME transaction
+        db.Execute("DELETE FROM dbo.MappingTableColumn WHERE FieldId = @FieldId;", new { FieldId = fieldId }, tx);
+        const string colInsert = """
+            INSERT dbo.MappingTableColumn
+                (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive,
+                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator)
+            VALUES
+                (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive,
+                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator);
+            """;
+        int order = 0;
+        foreach (var c in columns)
+        {
+            db.Execute(colInsert, new
+            {
+                FieldId = fieldId,
+                c.TargetSubProperty,
+                c.DataType,
+                c.TableHeader,
+                SortOrder = c.SortOrder == 0 ? order : c.SortOrder,
+                c.IsActive,
+                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
+            }, tx);
+            order++;
+        }
+
+        tx.Commit();
+        return fieldId;
+    }
+
+    /// <summary>
     /// Partial upsert used by the visual mapper. Only the given field is written; fields not passed
     /// in are untouched, and transformer steps are never modified (unlike SaveFields). When
     /// bindingChanged is false, the binding columns are preserved (only metadata is updated).

@@ -35,6 +35,12 @@ public interface IMappingRepository
     /// </summary>
     void SaveZones(int templateId, string mappingMode, IEnumerable<MappingField> fields);
 
+    /// <summary>
+    /// Upserts a single line_item TABLE_CELL field (its zone rect) AND replaces its sub-columns
+    /// (x-boundaries / anchor / line rule) in one transaction. Returns the field id (new on insert).
+    /// </summary>
+    int SaveTableZone(int templateId, MappingField tableField, IEnumerable<MappingTableColumn> columns);
+
     long SaveResult(long documentId, MappingOutcome outcome);
     (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long documentId);
     int UpdateResultValue(long documentId, long resultValueId, string? normalizedValue);

@@ -32,6 +32,24 @@ public sealed class ZoneFieldModel
     public decimal? ZoneH { get; set; }
     public string? ZoneOcrHint { get; set; }
     public byte? ZonePsm { get; set; }
+
+    /// <summary>Sub-columns when this is the line_item table field (SourceType == TABLE_CELL).</summary>
+    public List<ZoneColumnModel> Columns { get; set; } = new();
+}
+
+/// <summary>One table column for the designer: its sub-field, x-boundaries, anchor flag, and line rule.</summary>
+public sealed class ZoneColumnModel
+{
+    public int ColumnId { get; set; }
+    public string TargetSubProperty { get; set; } = "";
+    public string DataType { get; set; } = "STRING";
+    public int SortOrder { get; set; }
+    public decimal? ColXStart { get; set; }
+    public decimal? ColXEnd { get; set; }
+    public bool IsAnchor { get; set; }
+    public string? LineSelectMode { get; set; }
+    public string? LineSelectIndices { get; set; }
+    public string? LineJoinSeparator { get; set; }
 }
 
 // ---- save payload (JSON POST from zone-designer.js) ----
@@ -49,6 +67,7 @@ public sealed class ZoneFieldPayload
     public string DataType { get; set; } = "STRING";
     public bool IsRequired { get; set; }
     public decimal MinConfidence { get; set; } = 0.60m;
+    public string SourceType { get; set; } = "KEY_VALUE";   // TABLE_CELL for the line_item table field
 
     public int? ZonePage { get; set; }
     public decimal? ZoneX { get; set; }
@@ -57,4 +76,20 @@ public sealed class ZoneFieldPayload
     public decimal? ZoneH { get; set; }
     public string? ZoneOcrHint { get; set; }
     public byte? ZonePsm { get; set; }
+
+    public List<ZoneColumnPayload> Columns { get; set; } = new();
+}
+
+public sealed class ZoneColumnPayload
+{
+    public int ColumnId { get; set; }
+    public string TargetSubProperty { get; set; } = "";
+    public string DataType { get; set; } = "STRING";
+    public int SortOrder { get; set; }
+    public decimal? ColXStart { get; set; }
+    public decimal? ColXEnd { get; set; }
+    public bool IsAnchor { get; set; }
+    public string? LineSelectMode { get; set; }
+    public string? LineSelectIndices { get; set; }
+    public string? LineJoinSeparator { get; set; }
 }

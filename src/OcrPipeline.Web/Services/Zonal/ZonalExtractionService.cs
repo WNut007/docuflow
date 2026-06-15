@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Services.Imaging;
 using OcrPipeline.Web.Services.Mapping;
+using OcrPipeline.Web.Services.Normalization;
 using OcrPipeline.Web.Services.Ocr;
 using OcrPipeline.Web.Services.Transform;
 using SixLabors.ImageSharp;
@@ -16,36 +17,130 @@ namespace OcrPipeline.Web.Services.Zonal;
 /// produce. The page is deskewed once, then each zone is cropped, upscaled, and read with a tight
 /// PageSegMode + optional whitelist (<see cref="ZoneHint"/>). Normalization / transformers / review
 /// flags all run through <see cref="MappingEngine.RunZonalAsync"/> — the same path as OCR-first.
+///
+/// TABLE_CELL fields (line items, Phase 2): the table zone is OCR'd once for word boxes (geometry),
+/// rows are found by <see cref="TableRowSegmenter"/> (anchor-column-validated), then each cell is read
+/// individually with its column's hint and collapsed via <see cref="CellLineSelector"/>.
 /// </summary>
 public sealed class ZonalExtractionService(
     IRegionOcrEngine regionOcr,
     ImagePreprocessor preprocessor,
     PagePreviewRenderer previewRenderer,
     MappingEngine mappingEngine,
+    TextNormalizer normalizer,
     IOptions<TesseractOptions> tessOptions)
 {
     private readonly TesseractOptions _o = tessOptions.Value;
 
+    /// <summary>One segmented + typed table field result: line_item rows and an aggregate confidence.</summary>
+    public readonly record struct TableResult(List<Dictionary<string, object?>> Rows, decimal? Conf);
+
     /// <summary>
-    /// Pure-ish core: build the outcome given a per-zone OCR delegate. The delegate seam lets tests
-    /// supply canned region results (no images, no Tesseract, no DB). Only scalar fields that have a
-    /// zone are OCR'd; TABLE_CELL fields are deferred to Phase 2.
+    /// Pure-ish core: build the outcome from delegate seams so tests can supply canned results (no
+    /// images, no Tesseract, no DB). Scalar zones come from <paramref name="ocrZone"/>; TABLE_CELL
+    /// fields (when <paramref name="ocrTable"/> + <paramref name="columnsByField"/> are supplied) come
+    /// from <paramref name="ocrTable"/>.
     /// </summary>
     public async Task<MappingOutcome> BuildAsync(
         MappingTemplate template,
         Func<MappingField, Task<(string Raw, decimal Conf)>> ocrZone,
         IReadOnlyDictionary<int, List<TransformerStep>> steps,
+        Func<MappingField, IReadOnlyList<MappingTableColumn>, Task<TableResult>>? ocrTable = null,
+        IReadOnlyDictionary<int, List<MappingTableColumn>>? columnsByField = null,
         CancellationToken ct = default)
     {
         var results = new Dictionary<int, (string Raw, decimal Conf)>();
+        Dictionary<int, (List<Dictionary<string, object?>> Rows, decimal? Conf)>? tableResults = null;
+
         foreach (var field in template.Fields)
         {
             if (field.ZoneX is null) continue; // field has no zone
-            if (string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)) continue;
-            ct.ThrowIfCancellationRequested();
-            results[field.FieldId] = await ocrZone(field);
+            bool isTable = string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase);
+
+            if (isTable)
+            {
+                if (ocrTable is null || columnsByField is null) continue;
+                if (!columnsByField.TryGetValue(field.FieldId, out var cols)) continue;
+                var active = cols.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToList();
+                if (active.Count == 0) continue;
+
+                ct.ThrowIfCancellationRequested();
+                var tr = await ocrTable(field, active);
+                (tableResults ??= new())[field.FieldId] = (tr.Rows, tr.Conf);
+            }
+            else
+            {
+                ct.ThrowIfCancellationRequested();
+                results[field.FieldId] = await ocrZone(field);
+            }
         }
-        return await mappingEngine.RunZonalAsync(template, results, steps, ct);
+
+        return await mappingEngine.RunZonalAsync(template, results, steps, tableResults, ct);
+    }
+
+    /// <summary>
+    /// Segment a table zone's word boxes into rows (anchor-validated) and read each cell via
+    /// <paramref name="readCell"/>, collapsing multi-line cells per column and typing them through the
+    /// shared normalizer. Pure of image/OCR types (the cell read is a delegate) so it is unit-testable.
+    /// </summary>
+    public async Task<TableResult> BuildTableRowsAsync(
+        MappingField tableField,
+        IReadOnlyList<MappingTableColumn> columns,
+        IReadOnlyList<WordBox> zoneWords,
+        int[]? inkProfile,
+        Func<int, MappingTableColumn, RowBand, Task<(string Raw, decimal Conf)>> readCell,
+        CancellationToken ct = default)
+    {
+        double zoneX = (double)(tableField.ZoneX ?? 0m), zoneW = (double)(tableField.ZoneW ?? 0m);
+        var anchor = columns.FirstOrDefault(c => c.IsAnchor) ?? columns[0];
+        double axs = TableGeometry.ToZoneRelativeX((double)(anchor.ColXStart ?? (decimal)zoneX), zoneX, zoneW);
+        double axe = TableGeometry.ToZoneRelativeX((double)(anchor.ColXEnd ?? (decimal)(zoneX + zoneW)), zoneX, zoneW);
+
+        var bands = TableRowSegmenter.Segment(zoneWords, axs, axe, inkProfile: inkProfile);
+        var order = normalizer.InferDayMonthOrder(zoneWords.Select(w => w.Text));
+
+        // zone-relative x-range for a column (its ColX* are page-normalized like the zone rect).
+        (double S, double E) Range(MappingTableColumn c) => (
+            TableGeometry.ToZoneRelativeX((double)(c.ColXStart ?? (decimal)zoneX), zoneX, zoneW),
+            TableGeometry.ToZoneRelativeX((double)(c.ColXEnd ?? (decimal)(zoneX + zoneW)), zoneX, zoneW));
+
+        var rows = new List<Dictionary<string, object?>>(bands.Count);
+        var confs = new List<decimal>();
+        for (int r = 0; r < bands.Count; r++)
+        {
+            var obj = new Dictionary<string, object?>();
+            foreach (var col in columns)
+            {
+                ct.ThrowIfCancellationRequested();
+                var (raw, conf) = await readCell(r, col, bands[r]);
+                var collapsed = CellLineSelector.Apply(
+                    (raw ?? "").Replace("\r", "").Split('\n'), col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
+
+                // Fallback: a tight per-cell crop can miss a thin glyph (a lone "1") or an edge row; the
+                // whole-zone pass already has every word, so assemble the cell from the word boxes that
+                // fall inside (this row band ∩ this column).
+                if (collapsed.Length == 0)
+                {
+                    var (s, e) = Range(col);
+                    var cellWords = zoneWords
+                        .Where(w => w.XCenter >= s && w.XCenter <= e && w.YCenter >= bands[r].YStart && w.YCenter <= bands[r].YEnd)
+                        .ToList();
+                    if (cellWords.Count > 0)
+                    {
+                        collapsed = CellLineSelector.Apply(
+                            GroupWordsToLines(cellWords), col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
+                        conf = Math.Round(cellWords.Average(w => w.Conf), 4);
+                    }
+                }
+
+                obj[col.TargetSubProperty] = mappingEngine.NormalizeTyped(col.DataType, collapsed, order);
+                if (collapsed.Length > 0) confs.Add(conf);
+            }
+            rows.Add(obj);
+        }
+
+        decimal? conf2 = confs.Count > 0 ? Math.Round(confs.Average(), 4) : null;
+        return new TableResult(rows, conf2);
     }
 
     /// <summary>Production path: render a working raster per page, deskew once, crop + OCR each zone.</summary>
@@ -53,43 +148,51 @@ public sealed class ZonalExtractionService(
         Document doc,
         MappingTemplate template,
         IReadOnlyDictionary<int, List<TransformerStep>> steps,
+        IReadOnlyDictionary<int, List<MappingTableColumn>>? columnsByField = null,
         CancellationToken ct = default)
     {
         var preparedPages = new Dictionary<int, Image<L8>>();
         var tempPageFiles = new List<string>();
         try
         {
-            return await BuildAsync(template, async field =>
-            {
-                int pageNo = field.ZonePage ?? 1;
-                var page = GetPreparedPage(doc, pageNo, preparedPages, tempPageFiles);
-
-                var rect = ZoneGeometry.ToPixelRect(
-                    field.ZoneX!.Value, field.ZoneY ?? 0m, field.ZoneW ?? 0m, field.ZoneH ?? 0m,
-                    page.Width, page.Height);
-                var (psm, whitelist) = ZoneHint.Resolve(field.ZoneOcrHint, field.ZonePsm);
-
-                // crop the zone, then upscale toward MinOcrWidth (Lanczos) for crisp recognition
-                var (tw, th) = ImagePreprocessor.ComputeTargetSize(
-                    rect.Width, rect.Height, currentDpi: 0, targetDpi: _o.Dpi,
-                    minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
-
-                string crop = Path.Combine(Path.GetTempPath(), $"docuflow_zone_{Guid.NewGuid():N}.png");
-                try
+            return await BuildAsync(template,
+                ocrZone: async field =>
                 {
-                    using (var img = page.Clone(c => c
-                        .Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
-                        .Resize(tw, th, KnownResamplers.Lanczos3)))
-                    {
-                        img.SaveAsPng(crop);
-                    }
-                    return await regionOcr.OcrRegionAsync(crop, psm, whitelist, doc.OcrLanguages, ct);
-                }
-                finally
+                    int pageNo = field.ZonePage ?? 1;
+                    var page = GetPreparedPage(doc, pageNo, preparedPages, tempPageFiles);
+                    var rect = ZoneGeometry.ToPixelRect(
+                        field.ZoneX!.Value, field.ZoneY ?? 0m, field.ZoneW ?? 0m, field.ZoneH ?? 0m,
+                        page.Width, page.Height);
+                    var (psm, whitelist) = ZoneHint.Resolve(field.ZoneOcrHint, field.ZonePsm);
+                    return await CropAndReadAsync(page, rect, psm, whitelist, doc.OcrLanguages, ct);
+                },
+                steps,
+                ocrTable: async (field, cols) =>
                 {
-                    if (File.Exists(crop)) File.Delete(crop);
-                }
-            }, steps, ct);
+                    int pageNo = field.ZonePage ?? 1;
+                    var page = GetPreparedPage(doc, pageNo, preparedPages, tempPageFiles);
+                    var zoneRect = ZoneGeometry.ToPixelRect(
+                        field.ZoneX!.Value, field.ZoneY ?? 0m, field.ZoneW ?? 0m, field.ZoneH ?? 0m,
+                        page.Width, page.Height);
+                    double zoneX = (double)(field.ZoneX ?? 0m), zoneW = (double)(field.ZoneW ?? 0m);
+
+                    // (1) OCR the whole zone once for word boxes (geometry) + build the ink profile.
+                    var (words, profile) = await ReadZoneWordsAndProfileAsync(page, zoneRect, doc.OcrLanguages, ct);
+                    var boxes = words.Select(w => new WordBox(w.Text, w.X, w.Y, w.W, w.H, w.Conf)).ToList();
+
+                    // (2) segment rows + read each cell individually with its column's hint.
+                    return await BuildTableRowsAsync(field, cols, boxes, profile,
+                        readCell: async (_, col, band) =>
+                        {
+                            double relS = TableGeometry.ToZoneRelativeX((double)(col.ColXStart ?? (decimal)zoneX), zoneX, zoneW);
+                            double relE = TableGeometry.ToZoneRelativeX((double)(col.ColXEnd ?? (decimal)(zoneX + zoneW)), zoneX, zoneW);
+                            var cellRect = TableGeometry.CellPixelRect(zoneRect, relS, relE, band);
+                            var (cpsm, cwl) = ColumnOcr(col);
+                            return await CropAndReadAsync(page, cellRect, cpsm, cwl, doc.OcrLanguages, ct);
+                        }, ct);
+                },
+                columnsByField,
+                ct);
         }
         finally
         {
@@ -97,6 +200,97 @@ public sealed class ZonalExtractionService(
             foreach (var f in tempPageFiles) if (File.Exists(f)) File.Delete(f);
         }
     }
+
+    /// <summary>OCR settings for a table cell from its column DataType: numeric/date columns get a tight
+    /// single-line PSM + whitelist (reuses <see cref="ZoneHint"/>); text gets a block PSM so a wrapped
+    /// description reads as multiple lines (later collapsed by <see cref="CellLineSelector"/>).</summary>
+    private static (int Psm, string? Whitelist) ColumnOcr(MappingTableColumn col)
+    {
+        string hint = (col.DataType ?? "STRING").Trim().ToUpperInvariant() switch
+        {
+            "DECIMAL" => "NUMERIC",
+            "INT" => "INT",
+            "DATE" => "DATE",
+            _ => "TEXT"
+        };
+        return hint == "TEXT" ? (6, null) : ZoneHint.Resolve(hint, null);
+    }
+
+    /// <summary>Crop a region, upscale toward MinOcrWidth (Lanczos), and read it with a tight PSM.</summary>
+    private async Task<(string Raw, decimal Conf)> CropAndReadAsync(
+        Image<L8> page, PixelRect rect, int psm, string? whitelist, string? languages, CancellationToken ct)
+    {
+        var (tw, th) = ImagePreprocessor.ComputeTargetSize(
+            rect.Width, rect.Height, currentDpi: 0, targetDpi: _o.Dpi,
+            minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
+
+        string crop = Path.Combine(Path.GetTempPath(), $"docuflow_zone_{Guid.NewGuid():N}.png");
+        try
+        {
+            using (var img = page.Clone(c => c
+                .Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .Resize(tw, th, KnownResamplers.Lanczos3)))
+            {
+                img.SaveAsPng(crop);
+            }
+            return await regionOcr.OcrRegionAsync(crop, psm, whitelist, languages, ct);
+        }
+        finally
+        {
+            if (File.Exists(crop)) File.Delete(crop);
+        }
+    }
+
+    /// <summary>OCR a whole table zone for word boxes (block PSM) and compute its horizontal ink profile.</summary>
+    private async Task<(IReadOnlyList<RegionWord> Words, int[] Profile)> ReadZoneWordsAndProfileAsync(
+        Image<L8> page, PixelRect rect, string? languages, CancellationToken ct)
+    {
+        var (tw, th) = ImagePreprocessor.ComputeTargetSize(
+            rect.Width, rect.Height, currentDpi: 0, targetDpi: _o.Dpi,
+            minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
+
+        string crop = Path.Combine(Path.GetTempPath(), $"docuflow_ztab_{Guid.NewGuid():N}.png");
+        int[] profile;
+        try
+        {
+            using (var img = page.Clone(c => c
+                .Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .Resize(tw, th, KnownResamplers.Lanczos3)))
+            {
+                img.SaveAsPng(crop);
+                var px = new L8[img.Width * img.Height];
+                img.CopyPixelDataTo(px);
+                var buf = new byte[px.Length];
+                for (int i = 0; i < px.Length; i++) buf[i] = px[i].PackedValue;
+                profile = ImagePreprocessor.HorizontalInkProfile(buf, img.Width, img.Height);
+            }
+            var words = await regionOcr.OcrRegionWordsAsync(crop, psm: 6, whitelist: null, languages, ct);
+            return (words, profile);
+        }
+        finally
+        {
+            if (File.Exists(crop)) File.Delete(crop);
+        }
+    }
+
+    /// <summary>Group word boxes into reading-order text lines (a new line starts when a word clears the
+    /// current line's bottom); each line's words are joined left-to-right by a space. Cell-read fallback.</summary>
+    private static List<string> GroupWordsToLines(List<WordBox> words)
+    {
+        var lines = new List<string>();
+        var current = new List<WordBox>();
+        double bottom = double.NegativeInfinity;
+        foreach (var w in words.OrderBy(w => w.YCenter))
+        {
+            if (current.Count > 0 && w.Y > bottom) { lines.Add(JoinLine(current)); current.Clear(); }
+            current.Add(w);
+            bottom = current.Count == 1 ? w.YBottom : Math.Max(bottom, w.YBottom);
+        }
+        if (current.Count > 0) lines.Add(JoinLine(current));
+        return lines;
+    }
+
+    private static string JoinLine(List<WordBox> line) => string.Join(' ', line.OrderBy(w => w.X).Select(w => w.Text));
 
     private Image<L8> GetPreparedPage(Document doc, int pageNo, Dictionary<int, Image<L8>> cache, List<string> temps)
     {

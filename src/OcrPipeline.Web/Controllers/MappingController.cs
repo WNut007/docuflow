@@ -211,6 +211,8 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
             .Select(t => new TemplateOption(t.tpl.TemplateId, $"{t.docType} — {t.tpl.Name}", t.tpl.TemplateId == templateId))
             .ToList();
 
+        var columnsByField = mapping.GetTableColumns(templateId); // line_item sub-columns for table fields
+
         var vm = new ZoneDesignerViewModel
         {
             TemplateId = tpl.TemplateId,
@@ -231,7 +233,19 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
                 SourceType = f.SourceType,
                 ZonePage = f.ZonePage,
                 ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
-                ZoneOcrHint = f.ZoneOcrHint, ZonePsm = f.ZonePsm
+                ZoneOcrHint = f.ZoneOcrHint, ZonePsm = f.ZonePsm,
+                Columns = (columnsByField.TryGetValue(f.FieldId, out var cs) ? cs : new())
+                    .OrderBy(c => c.SortOrder)
+                    .Select(c => new ZoneColumnModel
+                    {
+                        ColumnId = c.ColumnId,
+                        TargetSubProperty = c.TargetSubProperty,
+                        DataType = c.DataType,
+                        SortOrder = c.SortOrder,
+                        ColXStart = c.ColXStart, ColXEnd = c.ColXEnd, IsAnchor = c.IsAnchor,
+                        LineSelectMode = c.LineSelectMode, LineSelectIndices = c.LineSelectIndices,
+                        LineJoinSeparator = c.LineJoinSeparator
+                    }).ToList()
             }).ToList()
         };
         return View(vm);
@@ -246,9 +260,12 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
         string mode = string.Equals(payload.MappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase)
             ? "ZONAL" : "OCR_FIRST";
 
-        // Persist only fields that have both a name and a drawn zone.
+        bool IsTable(ZoneFieldPayload f) => string.Equals(f.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase);
+        bool HasZone(ZoneFieldPayload f) => !string.IsNullOrWhiteSpace(f.TargetProperty) && f.ZoneX is not null;
+
+        // Scalar zones (name + drawn zone), persisted together; this call also sets the MappingMode.
         var fields = payload.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.TargetProperty) && f.ZoneX is not null)
+            .Where(f => HasZone(f) && !IsTable(f))
             .Select(f => new MappingField
             {
                 FieldId = f.FieldId,
@@ -264,7 +281,41 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
             }).ToList();
 
         mapping.SaveZones(payload.TemplateId, mode, fields);
-        return Json(new { ok = true, mode, saved = fields.Count });
+
+        // Table (line_item) fields: the zone rect is the table; its columns carry x-boundaries + rules.
+        int tables = 0;
+        foreach (var f in payload.Fields.Where(f => HasZone(f) && IsTable(f)))
+        {
+            var tableField = new MappingField
+            {
+                FieldId = f.FieldId,
+                TargetProperty = f.TargetProperty.Trim(),
+                DataType = string.IsNullOrWhiteSpace(f.DataType) ? "STRING" : f.DataType,
+                IsRequired = f.IsRequired,
+                MinConfidence = f.MinConfidence,
+                SourceType = "TABLE_CELL",
+                ZonePage = f.ZonePage ?? 1,
+                ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
+                ZoneOcrHint = NormalizeHint(f.ZoneOcrHint),
+                ZonePsm = f.ZonePsm
+            };
+            var cols = (f.Columns ?? new())
+                .Where(c => !string.IsNullOrWhiteSpace(c.TargetSubProperty))
+                .Select((c, i) => new MappingTableColumn
+                {
+                    TargetSubProperty = c.TargetSubProperty.Trim(),
+                    DataType = string.IsNullOrWhiteSpace(c.DataType) ? "STRING" : c.DataType,
+                    SortOrder = c.SortOrder == 0 ? i : c.SortOrder,
+                    IsActive = true,
+                    ColXStart = c.ColXStart, ColXEnd = c.ColXEnd, IsAnchor = c.IsAnchor,
+                    LineSelectMode = c.LineSelectMode, LineSelectIndices = c.LineSelectIndices,
+                    LineJoinSeparator = c.LineJoinSeparator
+                }).ToList();
+            mapping.SaveTableZone(payload.TemplateId, tableField, cols);
+            tables++;
+        }
+
+        return Json(new { ok = true, mode, saved = fields.Count, tables });
     }
 
     private static string NormalizeHint(string? hint) => (hint ?? "TEXT").Trim().ToUpperInvariant() switch
