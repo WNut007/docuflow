@@ -14,7 +14,8 @@
         documentId: data.documentId,
         pageCount: data.pageCount || 0,
         page: 1,
-        armed: null,                 // index of the field being drawn
+        armed: null,                 // index of the SELECTED field (drives highlight + table separators)
+        drawIntent: false,           // true only after "Draw" is clicked; one mousedown-draw consumes it
         fields: (data.fields || []).map(normalizeField)
     };
 
@@ -137,11 +138,16 @@
         } else if (boxEl) {
             const idx = Number(boxEl.dataset.fieldIdx);
             drag = { mode: "move", idx, sx: p.x, sy: p.y, orig: zoneOf(idx) }; arm(idx);
-        } else if (state.armed != null) {
+        } else if (state.drawIntent && state.armed != null) {              // draw only with an explicit Draw-intent
             const f = state.fields[state.armed];
             f.zoneX = p.x; f.zoneY = p.y; f.zoneW = 0; f.zoneH = 0; f.zonePage = state.page;
             drag = { mode: "draw", idx: state.armed, sx: p.x, sy: p.y };
-        } else { setStatus("Pick a field first (Draw), then drag its zone."); return; }
+        } else {
+            setStatus(state.armed != null
+                ? "Click “Draw” to (re)draw this field’s zone."     // selected but no draw-intent -> no-op
+                : "Pick a field first (Draw), then drag its zone.");
+            return;
+        }
         e.preventDefault();
     });
 
@@ -152,6 +158,7 @@
         if (drag.mode === "draw") {
             f.zoneX = Math.min(drag.sx, p.x); f.zoneY = Math.min(drag.sy, p.y);
             f.zoneW = Math.abs(p.x - drag.sx); f.zoneH = Math.abs(p.y - drag.sy);
+            setStatus(`Zone: ${(f.zoneW * 100).toFixed(1)}% × ${(f.zoneH * 100).toFixed(1)}%`); // live size cue
         } else if (drag.mode === "move") {
             f.zoneX = Math.min(clamp01(drag.orig.x + (p.x - drag.sx)), 1 - drag.orig.w);
             f.zoneY = Math.min(clamp01(drag.orig.y + (p.y - drag.sy)), 1 - drag.orig.h);
@@ -174,13 +181,18 @@
     window.addEventListener("mouseup", () => {
         if (!drag) return;
         const f = state.fields[drag.idx];
-        if (drag.mode === "draw" && (f.zoneW < 0.01 || f.zoneH < 0.01)) {
-            f.zoneX = f.zoneY = f.zoneW = f.zoneH = null;   // discard accidental click
+        if (drag.mode === "draw" && f.zoneW < 0.005 && f.zoneH < 0.005) {
+            f.zoneX = f.zoneY = f.zoneW = f.zoneH = null;   // discard accidental click (tiny dot in BOTH axes)
         } else {
             f._changed = true;
             if (drag.mode === "draw" && isTable(f)) reflowColumns(f);
             setStatus(`Zone set for ${f.targetProperty || "field"} — remember to Save.`);
         }
+        // Any finished drag consumes the Draw-intent (scalar AND table), so a later mousedown on empty
+        // canvas can't start a fresh zero-size draw and clobber the zone. The field stays SELECTED
+        // (state.armed), so table separators remain visible/draggable; move/resize use the box/handle
+        // and never needed the intent. Re-draw by clicking the field's "Draw" button again.
+        state.drawIntent = false;
         drag = null; renderOverlay(); renderFields();
     });
 
@@ -197,7 +209,7 @@
             const name = el("input", "form-control form-control-sm"); name.value = f.targetProperty; name.placeholder = "target property";
             name.addEventListener("input", () => { f.targetProperty = name.value; f._changed = true; });
             const armBtn = el("button", "btn btn-sm " + (idx === state.armed ? "btn-warning" : "btn-outline-primary"), "Draw");
-            armBtn.type = "button"; armBtn.addEventListener("click", () => arm(idx));
+            armBtn.type = "button"; armBtn.addEventListener("click", () => { state.drawIntent = true; arm(idx); });
             head.append(name, armBtn);
             body.appendChild(head);
 
@@ -322,7 +334,7 @@
     $("filter").addEventListener("input", renderFields);
     $("addField").addEventListener("click", () => {
         state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, minConfidence: 0.6, sourceType: "KEY_VALUE", zonePage: null, zoneX: null, zoneY: null, zoneW: null, zoneH: null, ocrHint: "TEXT", psm: null, columns: [], _changed: true });
-        state.armed = state.fields.length - 1; renderFields();
+        state.armed = state.fields.length - 1; state.drawIntent = true; renderFields(); // new field -> ready to draw
     });
     $("saveBtn").addEventListener("click", save);
     OcrOverlay.onImageReady($("pageImg"), renderOverlay);
