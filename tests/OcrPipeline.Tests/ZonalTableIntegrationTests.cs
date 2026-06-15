@@ -21,12 +21,13 @@ namespace OcrPipeline.Tests;
 /// </summary>
 public sealed class ZonalTableIntegrationTests
 {
-    [Fact]
+    [SkippableFact]
     public async Task Zonal_table_extracts_three_line_items_from_the_sample_invoice()
     {
         string? tessdata = FindUp("tessdata", isDir: true) is { } d && File.Exists(Path.Combine(d, "eng.traineddata")) ? d : null;
         string? sample = FindUp(Path.Combine("samples", "east-repair-invoice.png"), isDir: false);
-        if (tessdata is null || sample is null) return; // skip where the environment lacks tessdata/sample
+        // Report SKIPPED (not a silent green pass) where the environment lacks tessdata/sample.
+        Skip.If(tessdata is null || sample is null, "tessdata/eng.traineddata or samples/east-repair-invoice.png not found");
 
         var opts = Options.Create(new TesseractOptions { TessdataPath = tessdata, Languages = "eng", Dpi = 300, MinOcrWidth = 2200 });
         var preprocessor = new ImagePreprocessor();
@@ -65,7 +66,8 @@ public sealed class ZonalTableIntegrationTests
         }
         catch (System.Exception ex) when (ex is System.DllNotFoundException or System.BadImageFormatException)
         {
-            return; // native libtesseract not loadable here -> skip
+            Skip.If(true, "native libtesseract not loadable in this environment");
+            return; // unreachable (Skip.If threw) — keeps the compiler happy about the assignment below
         }
 
         var mv = outcome.Values.Single(v => v.TargetProperty == "LineItems");

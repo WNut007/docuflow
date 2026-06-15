@@ -12,6 +12,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Dynamic skip for xUnit 2.x (no Assert.Skip until v3): lets the live acceptance/region-OCR
+         tests report SKIPPED — not PASSED — when tessdata/native libs are absent, so a green CI run
+         means "ran or honestly skipped", never "silently did nothing". -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
     <!-- Direct ref so the native x64 libtesseract/leptonica copy into the test output, letting the
          self-skipping region-OCR test run for real where tessdata is installed. -->
     <PackageReference Include="Tesseract" Version="5.2.0" />

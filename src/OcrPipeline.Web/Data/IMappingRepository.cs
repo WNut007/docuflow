@@ -42,6 +42,6 @@ public interface IMappingRepository
     int SaveTableZone(int templateId, MappingField tableField, IEnumerable<MappingTableColumn> columns);
 
     long SaveResult(long documentId, MappingOutcome outcome);
-    (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long documentId);
+    (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long documentId);
     int UpdateResultValue(long documentId, long resultValueId, string? normalizedValue);
 }

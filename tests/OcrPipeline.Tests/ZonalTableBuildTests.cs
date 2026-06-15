@@ -76,4 +76,40 @@ public sealed class ZonalTableBuildTests
         Assert.Equal(15.00m, result.Rows[2]["amount"]);
         Assert.NotNull(result.Conf);
     }
+
+    /// <summary>
+    /// Locks the word-box fallback's column assignment as CENTER-based (not box-overlap based): a glyph
+    /// whose x-center sits just inside one of two tightly-drawn columns lands in that column ONLY and is
+    /// never double-counted into the adjacent one. "Edge" spans x 0.45..0.53 (center 0.49) so it bleeds
+    /// into the qty column's box [0.50,0.65] — an overlap-based rule would wrongly pull it into qty (and
+    /// "Edge 7" fails to parse as INT). Every per-cell read returns empty here to force the fallback.
+    /// </summary>
+    [Fact]
+    public async Task Fallback_assigns_a_boundary_word_to_exactly_one_column()
+    {
+        var tableField = new MappingField
+        {
+            FieldId = 10, TargetProperty = "LineItems", SourceType = "TABLE_CELL",
+            ZoneX = 0m, ZoneY = 0m, ZoneW = 1m, ZoneH = 1m
+        };
+        var cols = new List<MappingTableColumn>
+        {
+            Col("description", "STRING", 0.00m, 0.50m, sort: 0),
+            Col("qty",         "INT",    0.50m, 0.65m, anchor: true, sort: 1),
+        };
+
+        var words = new List<WordBox>
+        {
+            new("Edge", 0.45, 0.10, 0.08, 0.04, 0.9m),  // x-center 0.49 -> description only (box bleeds past 0.50)
+            new("7",    0.53, 0.10, 0.04, 0.04, 0.9m),  // x-center 0.55 -> qty (anchor) only
+        };
+
+        var result = await NewService().BuildTableRowsAsync(
+            tableField, cols, words, inkProfile: null,
+            readCell: (_, _, _) => Task.FromResult(("", 0m)));   // empty -> geometric fallback for every cell
+
+        Assert.Single(result.Rows);
+        Assert.Equal("Edge", result.Rows[0]["description"]);
+        Assert.Equal(7L, result.Rows[0]["qty"]);   // "Edge" did NOT leak into qty (would break INT parse)
+    }
 }

@@ -17,6 +17,7 @@ public sealed class ReviewViewModel
 public sealed class ReviewValueModel
 {
     public long ResultValueId { get; init; }
+    public int FieldId { get; init; }
     public string TargetProperty { get; init; } = "";
     public string? RawValue { get; init; }
     public string? NormalizedValue { get; init; }
@@ -28,6 +29,32 @@ public sealed class ReviewValueModel
 
     /// <summary>Overlay block id ("block-1234") derived from SourceRef, or null when there's no source box.</summary>
     public string? BlockId { get; init; }
+
+    // Zone rectangle (normalized 0..1) from the field's drawn zone, for the focus->highlight overlay.
+    public decimal? ZoneX { get; init; }
+    public decimal? ZoneY { get; init; }
+    public decimal? ZoneW { get; init; }
+    public decimal? ZoneH { get; init; }
+    public int ZonePage { get; init; } = 1;
+
+    /// <summary>Non-null only for the line_item TABLE_CELL field: its columns + parsed display rows.</summary>
+    public ReviewTableModel? Table { get; init; }
+}
+
+/// <summary>A line_item field rendered as an editable table on the review screen.</summary>
+public sealed class ReviewTableModel
+{
+    public IReadOnlyList<ReviewColumn> Columns { get; init; } = Array.Empty<ReviewColumn>();
+    /// <summary>One row per line item; each cell a DISPLAY string keyed by sub-property (scale-preserving).</summary>
+    public IReadOnlyList<IReadOnlyDictionary<string, string>> Rows { get; init; }
+        = Array.Empty<IReadOnlyDictionary<string, string>>();
+}
+
+public sealed class ReviewColumn
+{
+    public string SubProperty { get; init; } = "";
+    public string DataType { get; init; } = "STRING";
+    public bool IsAnchor { get; init; }
 }
 
 /// <summary>JSON body posted when a reviewer saves corrections.</summary>
@@ -35,10 +62,20 @@ public sealed class ReviewSavePayload
 {
     public long DocumentId { get; set; }
     public List<ReviewCorrection> Corrections { get; set; } = new();
+    /// <summary>Edited line_item tables: each is re-typed server-side and written as typed JSON.</summary>
+    public List<ReviewTableCorrection> TableCorrections { get; set; } = new();
 }
 
 public sealed class ReviewCorrection
 {
     public long ResultValueId { get; set; }
     public string? NormalizedValue { get; set; }
+}
+
+public sealed class ReviewTableCorrection
+{
+    public long ResultValueId { get; set; }
+    public int FieldId { get; set; }
+    /// <summary>Edited cell strings, one dictionary (sub-property -> string) per row.</summary>
+    public List<Dictionary<string, string>> Rows { get; set; } = new();
 }

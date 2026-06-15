@@ -23,4 +23,14 @@
     <PackageReference Include="Google.Cloud.Storage.V1" Version="4.15.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Copy the offline Tesseract language data (repo-root tessdata/, gitignored) into the build
+         output so the committed RELATIVE "tessdata" path (appsettings.json, resolved against
+         AppContext.BaseDirectory) works in EVERY environment — not just Development — and is
+         repopulated on every build so 'dotnet clean' can't break it. The traineddata is NOT
+         committed; on a clone/CI without it this glob matches nothing (real OCR self-skips). -->
+    <Content Include="..\..\tessdata\*.traineddata" Link="tessdata\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

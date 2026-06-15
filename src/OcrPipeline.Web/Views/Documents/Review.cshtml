@@ -77,12 +77,52 @@
                             <span class="fw-semibold">@v.TargetProperty</span>
                             <span class="badge text-bg-@v.BandClass">@(v.Confidence is { } c ? c.ToString("P0") : "—")</span>
                         </label>
-                        <input class="form-control form-control-sm review-input"
-                               data-rvid="@v.ResultValueId" data-original="@v.NormalizedValue"
-                               value="@v.NormalizedValue" />
-                        @if (!string.IsNullOrEmpty(v.RawValue) && v.RawValue != v.NormalizedValue)
+                        @if (v.Table is { } tbl)
                         {
-                            <div class="form-text">raw: @v.RawValue</div>
+                            @* line_item TABLE_CELL -> editable table (round-trips to typed JSON on save) *@
+                            <div class="table-responsive">
+                                <table class="table table-sm li-table mb-1">
+                                    <thead>
+                                        <tr>
+                                            @foreach (var col in tbl.Columns)
+                                            {
+                                                <th class="small">@col.SubProperty@(col.IsAnchor ? " ⚓" : "")</th>
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (int r = 0; r < tbl.Rows.Count; r++)
+                                        {
+                                            <tr>
+                                                @foreach (var col in tbl.Columns)
+                                                {
+                                                    var cell = tbl.Rows[r].TryGetValue(col.SubProperty, out var cv) ? cv : "";
+                                                    <td>
+                                                        <input class="form-control form-control-sm li-cell"
+                                                               data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId"
+                                                               data-row="@r" data-sub="@col.SubProperty"
+                                                               data-original="@cell" value="@cell" />
+                                                    </td>
+                                                }
+                                            </tr>
+                                        }
+                                        @if (tbl.Rows.Count == 0)
+                                        {
+                                            <tr><td colspan="@tbl.Columns.Count" class="text-body-secondary small">No rows extracted.</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <input class="form-control form-control-sm review-input"
+                                   data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId" data-original="@v.NormalizedValue"
+                                   value="@v.NormalizedValue" />
+                            @if (!string.IsNullOrEmpty(v.RawValue) && v.RawValue != v.NormalizedValue)
+                            {
+                                <div class="form-text">raw: @v.RawValue</div>
+                            }
                         }
                     </div>
                 }

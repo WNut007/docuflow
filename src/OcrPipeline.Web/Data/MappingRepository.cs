@@ -418,11 +418,11 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         return resultId;
     }
 
-    public (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long documentId)
+    public (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long documentId)
     {
         using var db = factory.Create();
         const string resSql = """
-            SELECT TOP 1 MappingResultId, OverallConfidence, NeedsReview, MappedJson
+            SELECT TOP 1 MappingResultId, OverallConfidence, NeedsReview, MappedJson, TemplateId
             FROM dbo.MappingResult
             WHERE DocumentId = @DocumentId
             ORDER BY MappingResultId DESC;
@@ -439,7 +439,7 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
             ORDER BY ResultValueId;
             """;
         var values = db.Query<MappedValueRow>(valSql, new { ResultId = resultId }).ToList();
-        return ((decimal?)res.OverallConfidence, (bool)res.NeedsReview, (string?)res.MappedJson, values);
+        return ((decimal?)res.OverallConfidence, (bool)res.NeedsReview, (string?)res.MappedJson, (int)res.TemplateId, values);
     }
 
     /// <summary>

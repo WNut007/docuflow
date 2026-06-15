@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OcrPipeline.Web.Data;
@@ -7,6 +8,7 @@ using OcrPipeline.Web.Models;
 using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Imaging;
 using OcrPipeline.Web.Services.Mapping;
+using OcrPipeline.Web.Services.Normalization;
 using OcrPipeline.Web.Services.Ocr;
 using OcrPipeline.Web.Services.Queue;
 
@@ -24,6 +26,8 @@ public sealed class DocumentsController(
     ProcessorRepository processors,
     IOcrEngine ocrEngine,
     PagePreviewRenderer previewRenderer,
+    MappingEngine mappingEngine,
+    TextNormalizer normalizer,
     IConfiguration config) : Controller
 {
     public IActionResult Index()
@@ -142,16 +146,47 @@ public sealed class DocumentsController(
                 Document = doc, HasResult = false, Cutoff = cutoff, PageCount = doc.PageCount
             });
 
-        var values = result.Value.values.Select(v => new ReviewValueModel
+        // Hydrate each value with its field's zone rect (focus->highlight) and, for the line_item
+        // TABLE_CELL field, its columns + parsed display rows (editable table instead of raw JSON).
+        var template = mappingRepo.GetTemplateById(result.Value.templateId);
+        var fieldsById = template?.Fields.ToDictionary(f => f.FieldId) ?? new Dictionary<int, MappingField>();
+        var columnsByField = mappingRepo.GetTableColumns(result.Value.templateId);
+
+        var values = result.Value.values.Select(v =>
         {
-            ResultValueId = v.ResultValueId,
-            TargetProperty = v.TargetProperty,
-            RawValue = v.RawValue,
-            NormalizedValue = v.NormalizedValue,
-            Confidence = v.Confidence,
-            IsBelowThreshold = v.IsBelowThreshold,
-            BandClass = ConfidenceBands.CssClass(ConfidenceBands.Band(v.Confidence, cutoff)),
-            BlockId = BlockIdFromSourceRef(v.SourceRef)
+            fieldsById.TryGetValue(v.FieldId, out var field);
+            ReviewTableModel? table = null;
+            if (field is not null
+                && string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)
+                && columnsByField.TryGetValue(v.FieldId, out var rawCols))
+            {
+                var cols = rawCols.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToList();
+                if (cols.Count > 0)
+                    table = new ReviewTableModel
+                    {
+                        Columns = cols.Select(c => new ReviewColumn
+                        {
+                            SubProperty = c.TargetSubProperty, DataType = c.DataType, IsAnchor = c.IsAnchor
+                        }).ToList(),
+                        Rows = LineItemTable.Parse(v.NormalizedValue, cols)
+                    };
+            }
+
+            return new ReviewValueModel
+            {
+                ResultValueId = v.ResultValueId,
+                FieldId = v.FieldId,
+                TargetProperty = v.TargetProperty,
+                RawValue = v.RawValue,
+                NormalizedValue = v.NormalizedValue,
+                Confidence = v.Confidence,
+                IsBelowThreshold = v.IsBelowThreshold,
+                BandClass = ConfidenceBands.CssClass(ConfidenceBands.Band(v.Confidence, cutoff)),
+                BlockId = BlockIdFromSourceRef(v.SourceRef),
+                ZoneX = field?.ZoneX, ZoneY = field?.ZoneY, ZoneW = field?.ZoneW, ZoneH = field?.ZoneH,
+                ZonePage = field?.ZonePage ?? 1,
+                Table = table
+            };
         }).ToList();
 
         return View(new ReviewViewModel
@@ -177,6 +212,26 @@ public sealed class DocumentsController(
         int applied = 0;
         foreach (var c in payload.Corrections)
             applied += mappingRepo.UpdateResultValue(payload.DocumentId, c.ResultValueId, c.NormalizedValue);
+
+        // Line_item tables: re-type each edited cell server-side through the SAME path as extraction
+        // (MappingEngine.NormalizeTyped), so qty stays int / prices stay decimal regardless of client.
+        if (payload.TableCorrections.Count > 0)
+        {
+            int templateId = mappingRepo.GetLatestResult(payload.DocumentId)?.templateId ?? 0;
+            var columnsByField = mappingRepo.GetTableColumns(templateId);
+            foreach (var t in payload.TableCorrections)
+            {
+                if (!columnsByField.TryGetValue(t.FieldId, out var rawCols)) continue;
+                var cols = rawCols.Where(col => col.IsActive).OrderBy(col => col.SortOrder).ToList();
+                if (cols.Count == 0) continue;
+
+                var order = normalizer.InferDayMonthOrder(t.Rows.SelectMany(r => r.Values));
+                var typed = LineItemTable.BuildTypedRows(
+                    cols, t.Rows, (dt, raw) => mappingEngine.NormalizeTyped(dt, raw, order));
+                var json = JsonSerializer.Serialize(typed);
+                applied += mappingRepo.UpdateResultValue(payload.DocumentId, t.ResultValueId, json);
+            }
+        }
 
         var status = ReviewWorkflow.Finalize(documents, doc, applied, GetUserId());
 

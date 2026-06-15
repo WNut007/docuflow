@@ -35,8 +35,8 @@ public sealed class ExportServiceTests
 
     private sealed class FakeMapping(string? json) : IMappingRepository
     {
-        public (decimal? overall, bool needsReview, string? json, List<MappedValueRow> values)? GetLatestResult(long d)
-            => json is null ? null : (null, false, json, []);
+        public (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long d)
+            => json is null ? null : (null, false, json, 0, []);
         public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int t) => throw new NotSupportedException();
         public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
         public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
