@@ -48,6 +48,44 @@ public sealed class TesseractOcrEngine(
         return Task.FromResult((text, conf));
     }
 
+    /// <summary>
+    /// Zonal table geometry: OCR a cropped region (typically a whole table zone, block PSM) and return
+    /// per-word boxes normalized 0..1 to the crop. Reuses the same word iterator as the full-page path
+    /// (<see cref="ExtractAsync"/>). Text is incidental here — the boxes drive row segmentation.
+    /// </summary>
+    public Task<IReadOnlyList<RegionWord>> OcrRegionWordsAsync(
+        string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default)
+    {
+        string langs = string.IsNullOrWhiteSpace(languages) ? _o.Languages : languages.Trim();
+        string tessdata = ResolveTessdataOrThrow(langs);
+
+        using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
+        if (!string.IsNullOrEmpty(whitelist))
+            engine.SetVariable("tessedit_char_whitelist", whitelist);
+
+        using var pix = Pix.LoadFromFile(imagePath);
+        using var page = engine.Process(pix, (PageSegMode)psm);
+
+        float imgW = pix.Width, imgH = pix.Height;
+        var words = new List<RegionWord>();
+        using var iter = page.GetIterator();
+        iter.Begin();
+        do
+        {
+            ct.ThrowIfCancellationRequested();
+            if (imgW > 0 && imgH > 0 && iter.TryGetBoundingBox(PageIteratorLevel.Word, out Rect wr))
+            {
+                string word = (iter.GetText(PageIteratorLevel.Word) ?? "").Trim();
+                if (word.Length > 0)
+                    words.Add(new RegionWord(word,
+                        wr.X1 / imgW, wr.Y1 / imgH, wr.Width / imgW, wr.Height / imgH,
+                        (decimal)(iter.GetConfidence(PageIteratorLevel.Word) / 100f)));
+            }
+        }
+        while (iter.Next(PageIteratorLevel.Word));
+        return Task.FromResult<IReadOnlyList<RegionWord>>(words);
+    }
+
     public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)
     {
         // Tesseract reads raster images. PDF rasterization to per-page PNG arrives in Prompt 2.

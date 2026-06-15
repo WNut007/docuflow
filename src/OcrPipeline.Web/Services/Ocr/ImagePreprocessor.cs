@@ -192,6 +192,25 @@ public sealed class ImagePreprocessor
         return variance / h;
     }
 
+    /// <summary>
+    /// Horizontal ink projection: for each scanline (row) the count of dark pixels
+    /// (luma &lt; <paramref name="threshold"/>). High where a text line sits, ~0 in the whitespace gaps
+    /// between rows. Pure — the zonal table row segmenter uses it to drop row boundaries into the gaps.
+    /// <paramref name="luma"/> is a row-major 8-bit buffer; result length == <paramref name="height"/>.
+    /// </summary>
+    public static int[] HorizontalInkProfile(byte[] luma, int width, int height, byte threshold = 128)
+    {
+        var profile = new int[Math.Max(0, height)];
+        if (width <= 0 || height <= 0) return profile;
+        for (int y = 0; y < height; y++)
+        {
+            int count = 0, row = y * width;
+            for (int x = 0; x < width; x++) if (luma[row + x] < threshold) count++;
+            profile[y] = count;
+        }
+        return profile;
+    }
+
     /// <summary>3x3 median filter over an 8-bit buffer (edge pixels copied through). Pure function.</summary>
     public static byte[] Median3x3(byte[] src, int width, int height)
     {

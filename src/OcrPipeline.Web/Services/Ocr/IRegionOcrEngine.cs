@@ -15,4 +15,15 @@ public interface IRegionOcrEngine
     /// <returns>The recognized text (trimmed) and a 0..1 mean confidence.</returns>
     Task<(string Text, decimal Confidence)> OcrRegionAsync(
         string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default);
+
+    /// <summary>
+    /// OCR a cropped region and return per-WORD boxes (each normalized 0..1 to the crop) for GEOMETRY
+    /// — table row segmentation needs word positions, not perfect text. Used with a block PSM (6) over
+    /// a whole table zone; cell values are then read separately via <see cref="OcrRegionAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<RegionWord>> OcrRegionWordsAsync(
+        string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default);
 }
+
+/// <summary>One recognized word in a cropped region: text, box normalized 0..1 to the crop, conf 0..1.</summary>
+public readonly record struct RegionWord(string Text, double X, double Y, double W, double H, decimal Conf);
