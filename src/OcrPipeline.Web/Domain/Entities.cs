@@ -122,6 +122,8 @@ public sealed class MappingField
     public string? RowSelector { get; set; }            // FIRST/LAST/ALL
     public string? DefaultValue { get; set; }
     public decimal MinConfidence { get; set; } = 0.60m;
+    /// <summary>Multi-page role this zone applies to (Phase 3): FIRST/CONTINUATION/LAST/ANY; null = ANY.</summary>
+    public string? ZonePageRole { get; set; }
 }
 
 /// <summary>
@@ -137,6 +139,15 @@ public sealed class MappingTableColumn
     public string? TableHeader { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
+
+    // Table-zone columns (Phase 2; dormant until then). Column x-boundaries within the table zone,
+    // the row-bounding anchor flag, and how a multi-line cell collapses to a single value.
+    public decimal? ColXStart { get; set; }
+    public decimal? ColXEnd { get; set; }
+    public bool IsAnchor { get; set; }
+    public string? LineSelectMode { get; set; }         // ALL/PICK/FIRST
+    public string? LineSelectIndices { get; set; }      // e.g. "0,2"
+    public string? LineJoinSeparator { get; set; }      // e.g. " "
 }
 
 /// <summary>Engine output container — what an OCR provider returns.</summary>

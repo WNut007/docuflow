@@ -229,6 +229,7 @@ CREATE TABLE dbo.MappingField (
     RowSelector    VARCHAR(20)          NULL,       -- FIRST, LAST, ALL
     DefaultValue   NVARCHAR(400)        NULL,
     MinConfidence  DECIMAL(5,4)         NOT NULL CONSTRAINT DF_MappingField_MinConf DEFAULT(0.60),
+    ZonePageRole   VARCHAR(12)          NULL,       -- FIRST|CONTINUATION|LAST|ANY (multi-page; NULL=ANY)
     CONSTRAINT FK_MappingField_Template FOREIGN KEY (TemplateId) REFERENCES dbo.MappingTemplate(TemplateId)
 );
 GO
@@ -244,6 +245,13 @@ CREATE TABLE dbo.MappingTableColumn (
     TableHeader       NVARCHAR(120)      NULL,        -- OCR column header to match
     SortOrder         INT                NOT NULL CONSTRAINT DF_MTC_Sort DEFAULT(0),
     IsActive          BIT                NOT NULL CONSTRAINT DF_MTC_Active DEFAULT(1),
+    -- Table-zone columns (Phase 2): boundaries within the table zone + row-anchor + multi-line rule
+    ColXStart         DECIMAL(9,6)       NULL,
+    ColXEnd           DECIMAL(9,6)       NULL,
+    IsAnchor          BIT                NOT NULL CONSTRAINT DF_MTC_IsAnchor DEFAULT(0),
+    LineSelectMode    VARCHAR(10)        NULL,        -- ALL|PICK|FIRST
+    LineSelectIndices VARCHAR(50)        NULL,        -- e.g. '0,2'
+    LineJoinSeparator NVARCHAR(10)       NULL,        -- e.g. ' '
     CONSTRAINT FK_MappingTableColumn_Field FOREIGN KEY (FieldId) REFERENCES dbo.MappingField(FieldId)
 );
 GO
