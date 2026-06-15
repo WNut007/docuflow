@@ -366,15 +366,16 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         switch (dataType?.ToUpperInvariant())
         {
             case "DECIMAL":
-                return normalizer.TryNormalizeNumber(raw, out var d) ? d : raw.Trim();
+                return normalizer.TryNormalizeNumber(raw, out var d) ? d : TextNormalizer.NormalizeThaiDigits(raw).Trim();
             case "INT":
-                return normalizer.TryNormalizeNumber(raw, out var n) ? (long)n : raw.Trim();
+                return normalizer.TryNormalizeNumber(raw, out var n) ? (long)n : TextNormalizer.NormalizeThaiDigits(raw).Trim();
             case "BOOL":
                 var t = TextNormalizer.NormalizeThaiDigits(raw).Trim().ToLowerInvariant();
                 return t is "1" or "true" or "yes" or "y";
             case "DATE":
                 return normalizer.TryNormalizeDate(raw, order, out var dt)
-                    ? dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : raw.Trim();
+                    ? dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    : TextNormalizer.NormalizeThaiDigits(raw).Trim();   // parse failed -> at least Arabic-ize digits
             default: // STRING
                 return TextNormalizer.NormalizeThaiDigits(raw).Trim();
         }

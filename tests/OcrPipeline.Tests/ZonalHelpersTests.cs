@@ -42,14 +42,28 @@ public sealed class ZoneGeometryTests
 public sealed class ZoneHintTests
 {
     [Theory]
-    [InlineData("NUMERIC", "0123456789.,-")]
-    [InlineData("date", "0123456789/.-")]   // case-insensitive
-    [InlineData("INT", "0123456789")]
+    [InlineData("NUMERIC", "0123456789๐๑๒๓๔๕๖๗๘๙.,-")]
+    [InlineData("date", "0123456789๐๑๒๓๔๕๖๗๘๙/.-")]   // case-insensitive
+    [InlineData("INT", "0123456789๐๑๒๓๔๕๖๗๘๙")]
     public void Maps_hint_to_whitelist(string hint, string expected)
     {
         var (psm, whitelist) = ZoneHint.Resolve(hint, null);
         Assert.Equal(7, psm);                 // single line by default
         Assert.Equal(expected, whitelist);
+    }
+
+    [Theory]
+    [InlineData("NUMERIC")]
+    [InlineData("DATE")]
+    [InlineData("INT")]
+    public void Numeric_whitelists_allow_thai_digits_and_keep_arabic(string hint)
+    {
+        var (_, whitelist) = ZoneHint.Resolve(hint, null);
+        Assert.NotNull(whitelist);
+        foreach (var thai in "๐๑๒๓๔๕๖๗๘๙")            // Tesseract must be ALLOWED to emit Thai numerals
+            Assert.Contains(thai, whitelist!);
+        foreach (var arabic in "0123456789")            // ...without dropping the English digits
+            Assert.Contains(arabic, whitelist!);
     }
 
     [Theory]

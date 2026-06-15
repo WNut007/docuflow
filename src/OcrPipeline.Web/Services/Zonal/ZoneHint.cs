@@ -11,11 +11,14 @@ public static class ZoneHint
 
     public static (int Psm, string? Whitelist) Resolve(string? hint, byte? psmOverride)
     {
+        // Whitelists ADD Thai digits ๐-๙ (U+0E50–0E59) alongside Arabic so Tesseract can emit Thai
+        // numerals on a Thai zone (TextNormalizer Arabic-izes them downstream). English reads are
+        // unaffected — 0-9 . , - / are all still present; we only widen the allowed set.
         string? whitelist = (hint ?? "TEXT").Trim().ToUpperInvariant() switch
         {
-            "NUMERIC" => "0123456789.,-",
-            "DATE"    => "0123456789/.-",
-            "INT"     => "0123456789",
+            "NUMERIC" => "0123456789๐๑๒๓๔๕๖๗๘๙.,-",
+            "DATE"    => "0123456789๐๑๒๓๔๕๖๗๘๙/.-",
+            "INT"     => "0123456789๐๑๒๓๔๕๖๗๘๙",
             _         => null // TEXT / unknown -> no restriction
         };
         int psm = psmOverride is { } p && p > 0 ? p : SingleLinePsm;
