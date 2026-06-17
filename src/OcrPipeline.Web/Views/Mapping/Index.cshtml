@@ -2,6 +2,34 @@
 @{ ViewData["Title"] = "Mappings"; }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Mapping templates</h1>
+    <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#newTpl">
+        <i class="bi bi-plus-lg"></i> New template
+    </button>
+</div>
+<div class="collapse mb-3" id="newTpl">
+    <div class="card card-body">
+        <form method="post" asp-action="CreateTemplate" class="row g-2 align-items-end">
+            @Html.AntiForgeryToken()
+            <div class="col-md-5">
+                <label class="form-label small mb-0">Name</label>
+                <input name="name" class="form-control form-control-sm" placeholder="e.g. Invoice — Acme single page" required />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">Doc type</label>
+                <input name="documentTypeId" type="number" value="1" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Mode</label>
+                <select name="mappingMode" class="form-select form-select-sm">
+                    <option value="ZONAL" selected>Zonal (drawn zones)</option>
+                    <option value="OCR_FIRST">OCR-first (blocks)</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-sm btn-primary w-100" type="submit">Create &amp; draw</button>
+            </div>
+        </form>
+    </div>
 </div>
 <p class="text-body-secondary">
     A template maps extracted <strong>document properties</strong> onto a <strong>target model</strong>'s fields,

@@ -11,11 +11,11 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         const string sql = """
             INSERT dbo.Document
                 (OriginalFileName, StoredPath, ContentType, FileSizeBytes, Sha256,
-                 SourceChannel, StatusCode, UploadedByUserId, OcrLanguages)
+                 SourceChannel, StatusCode, UploadedByUserId, OcrLanguages, TemplateId)
             OUTPUT INSERTED.DocumentId
             VALUES
                 (@OriginalFileName, @StoredPath, @ContentType, @FileSizeBytes, @Sha256,
-                 @SourceChannel, @StatusCode, @UploadedByUserId, @OcrLanguages);
+                 @SourceChannel, @StatusCode, @UploadedByUserId, @OcrLanguages, @TemplateId);
             """;
         return db.ExecuteScalar<long>(sql, doc);
     }
@@ -25,7 +25,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         using var db = factory.Create();
         const string sql = """
             SELECT DocumentId, OriginalFileName, StoredPath, ContentType, FileSizeBytes,
-                   Sha256, SourceChannel, DocumentTypeId, ClassifyConfidence, StatusCode,
+                   Sha256, SourceChannel, DocumentTypeId, TemplateId, ClassifyConfidence, StatusCode,
                    PageCount, UploadedByUserId, OcrLanguages, CreatedAtUtc
             FROM dbo.Document
             WHERE DocumentId = @DocumentId;
@@ -53,7 +53,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
         using var db = factory.Create();
         const string sql = """
             SELECT DocumentId, OriginalFileName, StoredPath, ContentType, FileSizeBytes,
-                   Sha256, SourceChannel, DocumentTypeId, ClassifyConfidence, StatusCode,
+                   Sha256, SourceChannel, DocumentTypeId, TemplateId, ClassifyConfidence, StatusCode,
                    PageCount, UploadedByUserId, OcrLanguages, CreatedAtUtc
             FROM dbo.Document
             WHERE StatusCode = @StatusCode

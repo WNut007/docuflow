@@ -19,7 +19,8 @@ public sealed class ZonalTableBuildTests
     private static ZonalExtractionService NewService()
     {
         var engine = new MappingEngine(new TransformerPipeline(System.Array.Empty<IValueTransformer>()), new TextNormalizer());
-        return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()));
+        return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ZonalExtractionService>.Instance);
     }
 
     private static MappingTableColumn Col(string sub, string dt, decimal xs, decimal xe, bool anchor = false, int sort = 0)

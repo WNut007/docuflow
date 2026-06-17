@@ -76,6 +76,36 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         tx.Commit();
     }
 
+    public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int documentTypeId)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT t.TemplateId, t.DocumentTypeId, t.Version, t.IsActive,
+                   CAST(CASE WHEN EXISTS (
+                       SELECT 1 FROM dbo.MappingField f
+                       WHERE f.TemplateId = t.TemplateId AND f.ZonePageRole IS NOT NULL
+                   ) THEN 1 ELSE 0 END AS BIT) AS IsMultiPage
+            FROM dbo.MappingTemplate t
+            WHERE t.DocumentTypeId = @DocumentTypeId;
+            """;
+        return db.Query<TemplateResolver.Candidate>(sql, new { DocumentTypeId = documentTypeId }).ToList();
+    }
+
+    public int CreateTemplate(int documentTypeId, string name, string targetModel, string mappingMode)
+    {
+        using var db = factory.Create();
+        const string sql = """
+            INSERT dbo.MappingTemplate (DocumentTypeId, Name, TargetModel, Version, IsActive, MappingMode)
+            OUTPUT INSERTED.TemplateId
+            VALUES (@DocumentTypeId, @Name, @TargetModel, 1, 1, @MappingMode);
+            """;
+        return db.ExecuteScalar<int>(sql, new
+        {
+            DocumentTypeId = documentTypeId, Name = name,
+            TargetModel = targetModel, MappingMode = mappingMode
+        });
+    }
+
     public MappingTemplate? GetActiveTemplateForType(int documentTypeId)
     {
         using var db = factory.Create();
@@ -321,6 +351,32 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
 
         tx.Commit();
         return fieldId;
+    }
+
+    public int DeleteZoneFields(int templateId, IEnumerable<int> fieldIds)
+    {
+        var ids = fieldIds.Where(i => i > 0).Distinct().ToList();
+        if (ids.Count == 0) return 0;
+
+        using var db = factory.Create();
+        using var tx = db.BeginTransaction();
+        int deleted = 0;
+        foreach (var id in ids)
+        {
+            // FK-safe: a region still referenced by a stored result (FK_MRV_Field) is left in place
+            // rather than cascade-deleting extraction history. (A redundant region never emits a
+            // result value, so the one the user removes is normally unreferenced.)
+            bool referenced = db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.MappingResultValue WHERE FieldId = @id;", new { id }, tx) > 0;
+            if (referenced) continue;
+
+            db.Execute("DELETE FROM dbo.MappingTableColumn WHERE FieldId = @id;", new { id }, tx);
+            deleted += db.Execute(
+                "DELETE FROM dbo.MappingField WHERE FieldId = @id AND TemplateId = @templateId;",
+                new { id, templateId }, tx);
+        }
+        tx.Commit();
+        return deleted;
     }
 
     /// <summary>
