@@ -8,14 +8,14 @@
 </div>
 <div class="collapse mb-3" id="newTpl">
     <div class="card card-body">
-        <form method="post" asp-action="CreateTemplate" class="row g-2 align-items-end">
+        <form method="post" asp-action="CreateTemplate" enctype="multipart/form-data" class="row g-3">
             @Html.AntiForgeryToken()
-            <div class="col-md-4">
-                <label class="form-label small mb-0">Name</label>
+            <div class="col-12">
+                <label class="form-label small mb-1">Template name</label>
                 <input name="name" class="form-control form-control-sm" placeholder="e.g. Invoice — Acme single page" required />
             </div>
-            <div class="col-md-3">
-                <label class="form-label small mb-0">Document type</label>
+            <div class="col-md-6">
+                <label class="form-label small mb-1">Document type</label>
                 <select name="documentTypeId" class="form-select form-select-sm" required>
                 @foreach (var dt in (IReadOnlyList<(int Id, string Name)>)(ViewBag.DocTypes ?? new List<(int, string)>()))
                 {
@@ -30,15 +30,22 @@
                 }
                 </select>
             </div>
-            <div class="col-md-3">
-                <label class="form-label small mb-0">Mode</label>
+            <div class="col-md-6">
+                <label class="form-label small mb-1">Mapping mode</label>
                 <select name="mappingMode" class="form-select form-select-sm">
                     <option value="ZONAL" selected>Zonal (drawn zones)</option>
                     <option value="OCR_FIRST">OCR-first (blocks)</option>
                 </select>
             </div>
-            <div class="col-md-2">
-                <button class="btn btn-sm btn-primary w-100" type="submit">Create &amp; draw</button>
+            <div class="col-12">
+                <label class="form-label small mb-1">Sample document</label>
+                <input name="sample" type="file" accept=".pdf,image/*" class="form-control form-control-sm" required />
+                <div class="form-text">PDF or image to draw zones over.</div>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-sm btn-primary" type="submit">
+                    <i class="bi bi-vector-pen me-1"></i>Create &amp; draw zones
+                </button>
             </div>
         </form>
     </div>

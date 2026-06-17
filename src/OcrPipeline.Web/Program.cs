@@ -51,6 +51,7 @@ else
 builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
 
 builder.Services.AddScoped<ExtractionService>();
+builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
 
 // Transformer plugins (Drupal-style preprocess). Register each implementation
 // against IValueTransformer; the pipeline resolves them by Type.

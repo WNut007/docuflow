@@ -43,6 +43,7 @@ public sealed class ExportServiceTests
         public MappingTemplate? GetActiveTemplateForType(int t) => throw new NotSupportedException();
         public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int t) => throw new NotSupportedException();
         public int CreateTemplate(int dt, string name, string model, string mode) => throw new NotSupportedException();
+        public void SetTemplateSample(int t, long d) => throw new NotSupportedException();
         public IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates() => throw new NotSupportedException();
         public IReadOnlyList<(int Id, string Name)> GetDocumentTypes() => throw new NotSupportedException();
         public MappingTemplate? GetTemplateById(int t) => throw new NotSupportedException();

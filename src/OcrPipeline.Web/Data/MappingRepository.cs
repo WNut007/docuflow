@@ -106,6 +106,13 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         });
     }
 
+    public void SetTemplateSample(int templateId, long documentId)
+    {
+        using var db = factory.Create();
+        const string sql = "UPDATE dbo.MappingTemplate SET SampleDocumentId = @DocumentId WHERE TemplateId = @TemplateId;";
+        db.Execute(sql, new { TemplateId = templateId, DocumentId = documentId });
+    }
+
     public MappingTemplate? GetActiveTemplateForType(int documentTypeId)
     {
         using var db = factory.Create();

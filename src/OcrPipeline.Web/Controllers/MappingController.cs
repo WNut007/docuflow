@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OcrPipeline.Web.Data;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
+using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Transform;
 using OcrPipeline.Web.Services.Zonal;
@@ -11,7 +13,8 @@ using OcrPipeline.Web.Services.Zonal;
 namespace OcrPipeline.Web.Controllers;
 
 [Authorize]
-public sealed class MappingController(IMappingRepository mapping, IDocumentRepository documents) : Controller
+public sealed class MappingController(
+    IMappingRepository mapping, IDocumentRepository documents, IDocumentIngestionService ingestion) : Controller
 {
     public IActionResult Index()
     {
@@ -23,18 +26,35 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
     /// Lets a user author a NEW layout instead of editing (and clobbering) an existing one.</summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public IActionResult CreateTemplate(int documentTypeId, string name, string? mappingMode, string? targetModel)
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> CreateTemplate(int documentTypeId, string name, string? mappingMode,
+        string? targetModel, IFormFile? sample, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name)) { TempData["Saved"] = "Template name is required."; return RedirectToAction(nameof(Index)); }
         // Orphan-proofing: only accept a real, active document type (the form is a dropdown, but a
         // forged/stale post could still send a bad id — reject it before the FK would).
         if (mapping.GetDocumentTypes().All(t => t.Id != documentTypeId))
         { TempData["Saved"] = "Please choose a valid document type."; return RedirectToAction(nameof(Index)); }
+        // A template OWNS the sample its zones are drawn over — required at create time.
+        if (sample is null || sample.Length == 0)
+        { TempData["Saved"] = "Please choose a sample document to draw zones over."; return RedirectToAction(nameof(Index)); }
+
         string mode = string.Equals(mappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase) ? "ZONAL" : "OCR_FIRST";
         int id = mapping.CreateTemplate(documentTypeId, name.Trim(),
             string.IsNullOrWhiteSpace(targetModel) ? "Invoice" : targetModel.Trim(), mode);
+
+        // Store the sample as a drawing BACKDROP (SOURCE='SAMPLE', never enters the OCR pipeline) and
+        // bind it to the template, so the designer draws on it with no doc-picker.
+        long sampleId = await ingestion.StoreAndRasterizeAsync(
+            sample, sourceChannel: "SAMPLE", statusCode: "SAMPLE",
+            templateId: null, userId: GetUserId(), ocrLanguages: null, ct);
+        mapping.SetTemplateSample(id, sampleId);
+
         return RedirectToAction(nameof(Zones), new { templateId = id });
     }
+
+    private int? GetUserId()
+        => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var uid) ? uid : null;
 
     [HttpGet]
     public IActionResult Edit(int id)

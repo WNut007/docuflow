@@ -22,6 +22,9 @@ public interface IMappingRepository
     /// <summary>Creates an empty template for a document type; returns the new TemplateId.</summary>
     int CreateTemplate(int documentTypeId, string name, string targetModel, string mappingMode);
 
+    /// <summary>Binds a template to its sample document (the zone-designer drawing backdrop).</summary>
+    void SetTemplateSample(int templateId, long documentId);
+
     IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates();
 
     /// <summary>Active document types (Id + display name) for the New-template picker.</summary>
