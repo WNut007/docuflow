@@ -153,6 +153,18 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
             (int)r.FieldCount)).ToList();
     }
 
+    public IReadOnlyList<(int Id, string Name)> GetDocumentTypes()
+    {
+        using var db = factory.Create();
+        const string sql = """
+            SELECT DocumentTypeId, DisplayName
+            FROM dbo.DocumentType
+            WHERE IsActive = 1
+            ORDER BY DocumentTypeId;
+            """;
+        return db.Query(sql).Select(r => ((int)r.DocumentTypeId, (string)r.DisplayName)).ToList();
+    }
+
     public MappingTemplate? GetTemplateById(int templateId)
     {
         using var db = factory.Create();

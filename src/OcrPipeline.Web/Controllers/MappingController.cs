@@ -14,7 +14,10 @@ namespace OcrPipeline.Web.Controllers;
 public sealed class MappingController(IMappingRepository mapping, IDocumentRepository documents) : Controller
 {
     public IActionResult Index()
-        => View(mapping.GetAllTemplates());
+    {
+        ViewBag.DocTypes = mapping.GetDocumentTypes();
+        return View(mapping.GetAllTemplates());
+    }
 
     /// <summary>Create a new (empty) template for a document type, then open it in the zone designer.
     /// Lets a user author a NEW layout instead of editing (and clobbering) an existing one.</summary>
@@ -23,8 +26,12 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
     public IActionResult CreateTemplate(int documentTypeId, string name, string? mappingMode, string? targetModel)
     {
         if (string.IsNullOrWhiteSpace(name)) { TempData["Saved"] = "Template name is required."; return RedirectToAction(nameof(Index)); }
+        // Orphan-proofing: only accept a real, active document type (the form is a dropdown, but a
+        // forged/stale post could still send a bad id — reject it before the FK would).
+        if (mapping.GetDocumentTypes().All(t => t.Id != documentTypeId))
+        { TempData["Saved"] = "Please choose a valid document type."; return RedirectToAction(nameof(Index)); }
         string mode = string.Equals(mappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase) ? "ZONAL" : "OCR_FIRST";
-        int id = mapping.CreateTemplate(documentTypeId <= 0 ? 1 : documentTypeId, name.Trim(),
+        int id = mapping.CreateTemplate(documentTypeId, name.Trim(),
             string.IsNullOrWhiteSpace(targetModel) ? "Invoice" : targetModel.Trim(), mode);
         return RedirectToAction(nameof(Zones), new { templateId = id });
     }
