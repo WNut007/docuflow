@@ -31,12 +31,20 @@ public sealed class PipelineService(
             var doc = documents.GetById(documentId)
                 ?? throw new InvalidOperationException($"Document {documentId} not found.");
 
-            // 1) CLASSIFY (mockup: default to INVOICE type id = 1)
+            // 1) CLASSIFY (mockup: default to INVOICE type id = 1). Then RESOLVE which template of
+            // that type this document uses: the user's explicit pick at upload (doc.TemplateId) is
+            // required and wins; an absent/wrong-type pick resolves to null. (No page-count guessing —
+            // page POSITION roles live in PageRoleResolver inside the multi-page path.) This stops two
+            // layouts from sharing one template and clobbering each other's zones.
             const int classifiedTypeId = 1;
-            documents.SetClassification(documentId, classifiedTypeId, 0.92m);
-            documents.LogEvent(documentId, "CLASSIFY", "CAPTURED", "CLASSIFIED", "Auto-classified", byUserId);
+            var candidates = mappingRepo.GetTemplatesForType(classifiedTypeId);
+            var chosenTemplateId = TemplateResolver.Resolve(doc.TemplateId, candidates);
+            var template = chosenTemplateId is { } tid ? mappingRepo.GetTemplateById(tid) : null;
 
-            var template = mappingRepo.GetActiveTemplateForType(classifiedTypeId);
+            documents.SetClassification(documentId, template?.DocumentTypeId ?? classifiedTypeId, 0.92m);
+            documents.LogEvent(documentId, "CLASSIFY", "CAPTURED", "CLASSIFIED",
+                template is null ? "Auto-classified (no template)" : $"Auto-classified -> template '{template.Name}'",
+                byUserId);
 
             // ZONAL templates skip full-page OCR entirely: OCR only inside each drawn zone, straight
             // into the field. (No reliance on whatever blocks Tesseract's layout analysis produces.)
@@ -46,7 +54,13 @@ public sealed class PipelineService(
                 stage = "EXTRACT";
                 var zsteps = mappingRepo.GetTransformerSteps(template.TemplateId);
                 var zcols = mappingRepo.GetTableColumns(template.TemplateId); // line_item table zones
-                var zoutcome = await zonal.ProcessAsync(doc, template, zsteps, zcols, ct);
+
+                // Multi-page (Phase 3): a template that tags any zone with a page-role
+                // (FIRST/CONTINUATION/LAST) is read per page-role and its line_item rows concatenated.
+                // Legacy templates (all roles null) keep the unchanged single-page path verbatim.
+                var zoutcome = OcrPipeline.Web.Services.Zonal.ZonalRouting.IsMultiPage(template)
+                    ? await zonal.ProcessMultiPageAsync(doc, template, zsteps, zcols, ct)
+                    : await zonal.ProcessAsync(doc, template, zsteps, zcols, ct);
                 mappingRepo.SaveResult(documentId, zoutcome);
 
                 var znext = zoutcome.NeedsReview ? "NEEDS_REVIEW" : "MAPPED";

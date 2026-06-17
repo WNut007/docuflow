@@ -129,9 +129,27 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
             if (zoneResults.TryGetValue(f.FieldId, out var zr)) allProps[f.TargetProperty] = zr.Raw;
         var fullText = string.Join('\n', zoneResults.Values.Select(v => v.Raw));
 
+        // Phase 3: a line_item table may be defined by several role-tagged TABLE_CELL fields
+        // (FIRST/CONTINUATION/LAST) sharing one TargetProperty, but the concatenated rows arrive once
+        // under a single canonical field id in tableResults. These are the properties already produced
+        // by a table result; sibling region fields of the same property are skipped below so they
+        // don't overwrite the merged value with an empty default.
+        var tableProps = tableResults is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : template.Fields.Where(f => tableResults.ContainsKey(f.FieldId))
+                             .Select(f => f.TargetProperty)
+                             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var field in template.Fields)
         {
             var mv = new MappedValue { FieldId = field.FieldId, TargetProperty = field.TargetProperty };
+
+            // Skip a TABLE_CELL field that is a sibling region of a multi-page table (its property is
+            // emitted once by the canonical field that carries the concatenated rows).
+            if (string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)
+                && (tableResults is null || !tableResults.ContainsKey(field.FieldId))
+                && tableProps.Contains(field.TargetProperty))
+                continue;
 
             // TABLE_CELL field -> typed line_item array from the segmented table result.
             if (string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)
@@ -184,8 +202,10 @@ public sealed class MappingEngine(TransformerPipeline transformerPipeline, TextN
         outcome.NeedsReview =
             outcome.Values.Any(v => v.IsBelowThreshold) ||
             template.Fields.Where(f => f.IsRequired)
-                           .Any(f => string.IsNullOrWhiteSpace(
-                               outcome.Values.First(v => v.FieldId == f.FieldId).NormalizedValue));
+                           .Select(f => outcome.Values.FirstOrDefault(v => v.FieldId == f.FieldId))
+                           // FirstOrDefault: a skipped sibling region field (multi-page table) has no
+                           // value of its own — its property is covered by the canonical emitter.
+                           .Any(v => v is not null && string.IsNullOrWhiteSpace(v.NormalizedValue));
 
         outcome.MappedJson = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
         return outcome;

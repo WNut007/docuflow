@@ -5,7 +5,8 @@
     {
         documentId = Model.Document.DocumentId,
         pageCount = Model.PageCount,
-        values = Model.Values
+        values = Model.Values,
+        pageTableZones = Model.PageTableZones
     };
 }
 
@@ -48,7 +49,7 @@
     <div class="col-lg-7">
         <div class="card h-100">
             <div class="card-header d-flex align-items-center gap-2">
-                <i class="bi bi-file-earmark-text"></i> Page 1 / @Model.PageCount
+                <i class="bi bi-file-earmark-text"></i> <span id="pageLabel">Page 1 / @Model.PageCount</span>
                 <span class="ms-auto small text-body-secondary">
                     <span class="badge text-bg-success">high</span>
                     <span class="badge text-bg-warning">medium</span>
@@ -79,39 +80,65 @@
                         </label>
                         @if (v.Table is { } tbl)
                         {
-                            @* line_item TABLE_CELL -> editable table (round-trips to typed JSON on save) *@
-                            <div class="table-responsive">
-                                <table class="table table-sm li-table mb-1">
-                                    <thead>
-                                        <tr>
-                                            @foreach (var col in tbl.Columns)
-                                            {
-                                                <th class="small">@col.SubProperty@(col.IsAnchor ? " ⚓" : "")</th>
-                                            }
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @for (int r = 0; r < tbl.Rows.Count; r++)
+                            @* ONE continuous editable line_item table (multi-page rows concatenated). *@
+                            <div class="li-wrap" data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId">
+                                @if (tbl.IsMultiPage)
+                                {
+                                    <div class="li-pagejump mb-1">
+                                        @foreach (var g in tbl.PageGroups)
                                         {
+                                            <button type="button" class="li-jump badge text-bg-light border" data-page="@g.Page"
+                                                    title="jump to page @g.Page">P@(g.Page)·@g.Count</button>
+                                        }
+                                    </div>
+                                }
+                                <div class="li-scroll">
+                                    <table class="table table-sm li-table mb-0">
+                                        <thead>
                                             <tr>
+                                                @if (tbl.IsMultiPage)
+                                                {
+                                                    <th class="small li-pgcol">Pg</th>
+                                                }
                                                 @foreach (var col in tbl.Columns)
                                                 {
-                                                    var cell = tbl.Rows[r].TryGetValue(col.SubProperty, out var cv) ? cv : "";
-                                                    <td>
-                                                        <input class="form-control form-control-sm li-cell"
-                                                               data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId"
-                                                               data-row="@r" data-sub="@col.SubProperty"
-                                                               data-original="@cell" value="@cell" />
-                                                    </td>
+                                                    <th class="small">@col.SubProperty@(col.IsAnchor ? " ⚓" : "")</th>
                                                 }
+                                                <th class="li-delcol"></th>
                                             </tr>
-                                        }
-                                        @if (tbl.Rows.Count == 0)
-                                        {
-                                            <tr><td colspan="@tbl.Columns.Count" class="text-body-secondary small">No rows extracted.</td></tr>
-                                        }
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            @for (int r = 0; r < tbl.Rows.Count; r++)
+                                            {
+                                                var pg = r < tbl.RowPages.Count ? tbl.RowPages[r] : 1;
+                                                <tr class="li-row" data-row="@r" data-pg="@pg" data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId">
+                                                    @if (tbl.IsMultiPage)
+                                                    {
+                                                        <td class="li-pgcol text-body-secondary small">@pg</td>
+                                                    }
+                                                    @foreach (var col in tbl.Columns)
+                                                    {
+                                                        var cell = tbl.Rows[r].TryGetValue(col.SubProperty, out var cv) ? cv : "";
+                                                        <td>
+                                                            <input class="form-control form-control-sm li-cell"
+                                                                   data-rvid="@v.ResultValueId" data-fieldid="@v.FieldId"
+                                                                   data-row="@r" data-pg="@pg" data-sub="@col.SubProperty"
+                                                                   data-dt="@col.DataType" data-anchor="@(col.IsAnchor ? "1" : "")"
+                                                                   data-original="@cell" value="@cell" />
+                                                        </td>
+                                                    }
+                                                    <td class="li-delcol">
+                                                        <button type="button" class="btn btn-sm btn-outline-danger py-0 li-del" title="delete row"><i class="bi bi-x"></i></button>
+                                                    </td>
+                                                </tr>
+                                            }
+                                            @if (tbl.Rows.Count == 0)
+                                            {
+                                                <tr><td colspan="99" class="text-body-secondary small">No rows extracted.</td></tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         }
                         else

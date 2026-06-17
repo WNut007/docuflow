@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  Multi-page invoice fixture for Phase 3 (FIRST / CONTINUATION / LAST) zonal extraction.
+  English layout on purpose — Thai-digit accuracy is a separate engine concern.
+
+  3 printed pages:
+    p1 FIRST        = header (invoice_no / date / vendor) + line items 1-5
+    p2 CONTINUATION = line items 6-10 (no header, no totals)
+    p3 LAST         = line items 11-12 + totals (subtotal / tax / total)
+
+  Render to a committed PDF (the app rasterizes PDFs per page), e.g.:
+    Headless Chrome/Edge:
+      chrome --headless --disable-gpu --print-to-pdf=samples/multipage-invoice.pdf \
+             --no-pdf-header-footer samples/multipage-invoice.html
+    or wkhtmltopdf:
+      wkhtmltopdf --page-size A4 samples/multipage-invoice.html samples/multipage-invoice.pdf
+
+  Ground truth is documented in CLAUDE.md ("Multi-page sample").
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Invoice INV-2024-777</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; color: #111; }
+    .page { width: 210mm; height: 297mm; padding: 18mm 16mm; page-break-after: always; position: relative; }
+    .page:last-child { page-break-after: auto; }
+    .hdr { display: flex; justify-content: space-between; border-bottom: 2px solid #222; padding-bottom: 8mm; margin-bottom: 8mm; }
+    .hdr h1 { margin: 0; font-size: 22pt; letter-spacing: 1px; }
+    .meta { text-align: right; font-size: 11pt; line-height: 1.6; }
+    .vendor { font-size: 12pt; line-height: 1.5; }
+    .vendor strong { font-size: 13pt; }
+    table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+    th, td { padding: 3mm 4mm; border-bottom: 1px solid #ccc; }
+    th { text-align: left; background: #f1f1f1; border-bottom: 2px solid #888; }
+    td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+    .pagetag { position: absolute; bottom: 10mm; right: 16mm; font-size: 9pt; color: #999; }
+    .totals { width: 70mm; margin-left: auto; margin-top: 8mm; font-size: 12pt; }
+    .totals td { border: none; padding: 2mm 4mm; }
+    .totals .grand { border-top: 2px solid #222; font-weight: bold; font-size: 13pt; }
+  </style>
+</head>
+<body>
+  <!-- ===================== PAGE 1 — FIRST (header + items 1-5) ===================== -->
+  <section class="page">
+    <div class="hdr">
+      <div class="vendor">
+        <strong>Acme Industrial Supply Co.</strong><br>
+        128 Forge Street<br>Springfield, IL 62701
+      </div>
+      <div class="meta">
+        <strong>INVOICE</strong><br>
+        Invoice No: INV-2024-777<br>
+        Date: 11/02/2019<br>
+        PO: PO-5521
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Description</th><th class="n">Qty</th><th class="n">Unit Price</th><th class="n">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Widget A</td><td class="n">1</td><td class="n">10.00</td><td class="n">10.00</td></tr>
+        <tr><td>Widget B</td><td class="n">2</td><td class="n">5.00</td><td class="n">10.00</td></tr>
+        <tr><td>Widget C</td><td class="n">1</td><td class="n">20.00</td><td class="n">20.00</td></tr>
+        <tr><td>Widget D</td><td class="n">3</td><td class="n">4.00</td><td class="n">12.00</td></tr>
+        <tr><td>Widget E</td><td class="n">2</td><td class="n">8.00</td><td class="n">16.00</td></tr>
+      </tbody>
+    </table>
+    <div class="pagetag">Page 1 of 3</div>
+  </section>
+
+  <!-- ================== PAGE 2 — CONTINUATION (items 6-10) ================== -->
+  <section class="page">
+    <table>
+      <thead>
+        <tr><th>Description</th><th class="n">Qty</th><th class="n">Unit Price</th><th class="n">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Widget F</td><td class="n">1</td><td class="n">15.00</td><td class="n">15.00</td></tr>
+        <tr><td>Widget G</td><td class="n">5</td><td class="n">2.00</td><td class="n">10.00</td></tr>
+        <tr><td>Widget H</td><td class="n">1</td><td class="n">25.00</td><td class="n">25.00</td></tr>
+        <tr><td>Widget I</td><td class="n">2</td><td class="n">6.00</td><td class="n">12.00</td></tr>
+        <tr><td>Widget J</td><td class="n">4</td><td class="n">3.00</td><td class="n">12.00</td></tr>
+      </tbody>
+    </table>
+    <div class="pagetag">Page 2 of 3</div>
+  </section>
+
+  <!-- ================== PAGE 3 — LAST (items 11-12 + totals) ================== -->
+  <section class="page">
+    <table>
+      <thead>
+        <tr><th>Description</th><th class="n">Qty</th><th class="n">Unit Price</th><th class="n">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Widget K</td><td class="n">1</td><td class="n">30.00</td><td class="n">30.00</td></tr>
+        <tr><td>Widget L</td><td class="n">2</td><td class="n">9.00</td><td class="n">18.00</td></tr>
+      </tbody>
+    </table>
+
+    <table class="totals">
+      <tr><td>Subtotal</td><td class="n">200.00</td></tr>
+      <tr><td>Tax (7%)</td><td class="n">14.00</td></tr>
+      <tr class="grand"><td>Total</td><td class="n">214.00</td></tr>
+    </table>
+    <div class="pagetag">Page 3 of 3</div>
+  </section>
+</body>
+</html>

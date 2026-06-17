@@ -6,6 +6,7 @@ using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
 using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Transform;
+using OcrPipeline.Web.Services.Zonal;
 
 namespace OcrPipeline.Web.Controllers;
 
@@ -14,6 +15,19 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
 {
     public IActionResult Index()
         => View(mapping.GetAllTemplates());
+
+    /// <summary>Create a new (empty) template for a document type, then open it in the zone designer.
+    /// Lets a user author a NEW layout instead of editing (and clobbering) an existing one.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult CreateTemplate(int documentTypeId, string name, string? mappingMode, string? targetModel)
+    {
+        if (string.IsNullOrWhiteSpace(name)) { TempData["Saved"] = "Template name is required."; return RedirectToAction(nameof(Index)); }
+        string mode = string.Equals(mappingMode, "ZONAL", StringComparison.OrdinalIgnoreCase) ? "ZONAL" : "OCR_FIRST";
+        int id = mapping.CreateTemplate(documentTypeId <= 0 ? 1 : documentTypeId, name.Trim(),
+            string.IsNullOrWhiteSpace(targetModel) ? "Invoice" : targetModel.Trim(), mode);
+        return RedirectToAction(nameof(Zones), new { templateId = id });
+    }
 
     [HttpGet]
     public IActionResult Edit(int id)
@@ -206,8 +220,8 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
         long? docId = documentId ?? docs.FirstOrDefault()?.DocumentId;
         int pageCount = docs.FirstOrDefault(d => d.DocumentId == docId)?.PageCount ?? 0;
 
+        // list ALL templates (not only active) so any layout can be edited without one clobbering another
         var templateOptions = mapping.GetAllTemplates()
-            .Where(t => t.tpl.IsActive)
             .Select(t => new TemplateOption(t.tpl.TemplateId, $"{t.docType} — {t.tpl.Name}", t.tpl.TemplateId == templateId))
             .ToList();
 
@@ -233,7 +247,7 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
                 SourceType = f.SourceType,
                 ZonePage = f.ZonePage,
                 ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
-                ZoneOcrHint = f.ZoneOcrHint, ZonePsm = f.ZonePsm,
+                ZoneOcrHint = f.ZoneOcrHint, ZonePsm = f.ZonePsm, ZonePageRole = f.ZonePageRole,
                 Columns = (columnsByField.TryGetValue(f.FieldId, out var cs) ? cs : new())
                     .OrderBy(c => c.SortOrder)
                     .Select(c => new ZoneColumnModel
@@ -263,6 +277,19 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
         bool IsTable(ZoneFieldPayload f) => string.Equals(f.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase);
         bool HasZone(ZoneFieldPayload f) => !string.IsNullOrWhiteSpace(f.TargetProperty) && f.ZoneX is not null;
 
+        // Guard (belt-and-suspenders to the designer UX): a multi-page line_item table is up to three
+        // role-tagged TABLE_CELL regions SHARING one TargetProperty. Reject duplicate roles / a
+        // multi-region table missing a role on any region before anything is persisted.
+        var validation = ZonalSaveValidator.Validate(payload.Fields
+            .Where(f => HasZone(f) && IsTable(f))
+            .Select(f => new ZonalSaveValidator.TableFieldInfo(f.TargetProperty.Trim(), f.ZonePageRole)));
+        if (!validation.IsValid)
+            return BadRequest(new { ok = false, error = validation.Error });
+
+        // Remove regions the user deleted (e.g. a redundant CONTINUATION) before upserting the rest.
+        if (payload.RemovedFieldIds.Count > 0)
+            mapping.DeleteZoneFields(payload.TemplateId, payload.RemovedFieldIds);
+
         // Scalar zones (name + drawn zone), persisted together; this call also sets the MappingMode.
         var fields = payload.Fields
             .Where(f => HasZone(f) && !IsTable(f))
@@ -277,7 +304,8 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
                 ZonePage = f.ZonePage ?? 1,
                 ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
                 ZoneOcrHint = NormalizeHint(f.ZoneOcrHint),
-                ZonePsm = f.ZonePsm
+                ZonePsm = f.ZonePsm,
+                ZonePageRole = NormalizeRole(f.ZonePageRole)
             }).ToList();
 
         mapping.SaveZones(payload.TemplateId, mode, fields);
@@ -297,7 +325,8 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
                 ZonePage = f.ZonePage ?? 1,
                 ZoneX = f.ZoneX, ZoneY = f.ZoneY, ZoneW = f.ZoneW, ZoneH = f.ZoneH,
                 ZoneOcrHint = NormalizeHint(f.ZoneOcrHint),
-                ZonePsm = f.ZonePsm
+                ZonePsm = f.ZonePsm,
+                ZonePageRole = NormalizeRole(f.ZonePageRole)
             };
             var cols = (f.Columns ?? new())
                 .Where(c => !string.IsNullOrWhiteSpace(c.TargetSubProperty))
@@ -324,6 +353,15 @@ public sealed class MappingController(IMappingRepository mapping, IDocumentRepos
         "DATE" => "DATE",
         "INT" => "INT",
         _ => "TEXT"
+    };
+
+    /// <summary>Multi-page page-role (Phase 3). Unknown/blank -> null (single-page/legacy behaviour).</summary>
+    private static string? NormalizeRole(string? role) => (role ?? "").Trim().ToUpperInvariant() switch
+    {
+        "FIRST" => "FIRST",
+        "CONTINUATION" or "CONT" => "CONTINUATION",
+        "LAST" => "LAST",
+        _ => null
     };
 
     /// <summary>User-friendly binding summary (never a raw regex).</summary>

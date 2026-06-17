@@ -12,6 +12,8 @@ public sealed class ReviewViewModel
     public decimal Cutoff { get; init; }            // Ocr:MinPageConfidence
     public int PageCount { get; init; }
     public IReadOnlyList<ReviewValueModel> Values { get; init; } = Array.Empty<ReviewValueModel>();
+    /// <summary>Per-physical-page line_item table zone (multi-page), for the row->page image highlight.</summary>
+    public IReadOnlyList<ReviewPageZone> PageTableZones { get; init; } = Array.Empty<ReviewPageZone>();
 }
 
 public sealed class ReviewValueModel
@@ -41,13 +43,33 @@ public sealed class ReviewValueModel
     public ReviewTableModel? Table { get; init; }
 }
 
-/// <summary>A line_item field rendered as an editable table on the review screen.</summary>
+/// <summary>A line_item field rendered as ONE editable table on the review screen (multi-page rows
+/// concatenated). <see cref="RowPages"/> is parallel to <see cref="Rows"/>.</summary>
 public sealed class ReviewTableModel
 {
     public IReadOnlyList<ReviewColumn> Columns { get; init; } = Array.Empty<ReviewColumn>();
     /// <summary>One row per line item; each cell a DISPLAY string keyed by sub-property (scale-preserving).</summary>
     public IReadOnlyList<IReadOnlyDictionary<string, string>> Rows { get; init; }
         = Array.Empty<IReadOnlyDictionary<string, string>>();
+    /// <summary>Source page per row (Phase 3 multi-page; all 1 for single-page), parallel to Rows.</summary>
+    public IReadOnlyList<int> RowPages { get; init; } = Array.Empty<int>();
+    /// <summary>Contiguous page runs for the compact jump strip.</summary>
+    public IReadOnlyList<ReviewTablePageGroup> PageGroups { get; init; } = Array.Empty<ReviewTablePageGroup>();
+    /// <summary>True when rows span more than one page -> show the Pg column + jump strip.</summary>
+    public bool IsMultiPage { get; init; }
+}
+
+/// <summary>One contiguous run of rows from the same source page (jump-strip chip).</summary>
+public sealed record ReviewTablePageGroup(int Page, int FirstRowIndex, int Count);
+
+/// <summary>The table zone rect (normalized 0..1) owning a given physical page, for the row->page highlight.</summary>
+public sealed class ReviewPageZone
+{
+    public int Page { get; init; }
+    public decimal X { get; init; }
+    public decimal Y { get; init; }
+    public decimal W { get; init; }
+    public decimal H { get; init; }
 }
 
 public sealed class ReviewColumn

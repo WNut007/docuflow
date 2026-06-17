@@ -39,6 +39,7 @@ public sealed class ExportService(
             logger.LogInformation("Skipping export for document {Id}: no mapped result to export.", documentId);
             return;
         }
+        json = StripInternalKeys(json);   // drop _-prefixed reserved keys (e.g. _pg page provenance) from the exported model
 
         var targets = exports.GetActiveTargets(doc.DocumentTypeId);
 
@@ -78,5 +79,33 @@ public sealed class ExportService(
             documents.LogEvent(documentId, "CONSUME", doc.StatusCode, "CONSUMED", $"Exported to {ran} target(s)", null);
         }
         // else: failures recorded in ExportLog; document stays VALIDATED and is re-exportable.
+    }
+
+    /// <summary>Remove reserved internal keys (any property whose name starts with '_', e.g. the
+    /// per-row <c>_pg</c> page marker) from the exported model so consumers never see them. Recurses
+    /// objects and arrays; on any parse failure the original json is returned unchanged.</summary>
+    public static string StripInternalKeys(string json)
+    {
+        System.Text.Json.Nodes.JsonNode? root;
+        try { root = System.Text.Json.Nodes.JsonNode.Parse(json); }
+        catch (System.Text.Json.JsonException) { return json; }
+        if (root is null) return json;
+
+        Strip(root);
+        return root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+        static void Strip(System.Text.Json.Nodes.JsonNode node)
+        {
+            if (node is System.Text.Json.Nodes.JsonObject obj)
+            {
+                foreach (var key in obj.Where(kv => kv.Key.StartsWith('_')).Select(kv => kv.Key).ToList())
+                    obj.Remove(key);
+                foreach (var kv in obj) if (kv.Value is not null) Strip(kv.Value);
+            }
+            else if (node is System.Text.Json.Nodes.JsonArray arr)
+            {
+                foreach (var item in arr) if (item is not null) Strip(item);
+            }
+        }
     }
 }

@@ -11,6 +11,7 @@ using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Normalization;
 using OcrPipeline.Web.Services.Ocr;
 using OcrPipeline.Web.Services.Queue;
+using OcrPipeline.Web.Services.Zonal;
 
 namespace OcrPipeline.Web.Controllers;
 
@@ -34,18 +35,33 @@ public sealed class DocumentsController(
         => View(documents.GetRecent());
 
     [HttpGet]
-    public IActionResult Upload() => View();
+    public IActionResult Upload()
+        => View(new UploadViewModel
+        {
+            Templates = mappingRepo.GetAllTemplates()
+                .Select(t => new UploadTemplateOption(t.tpl.TemplateId, $"{t.tpl.Name} ({t.docType})"))
+                .ToList()
+        });
 
     [HttpPost]
     [ValidateAntiForgeryToken]
     [RequestSizeLimit(50_000_000)]
-    public async Task<IActionResult> Upload(IFormFile file, string? ocrLanguages, CancellationToken ct)
+    public async Task<IActionResult> Upload(IFormFile file, string? ocrLanguages, int? templateId, CancellationToken ct)
     {
+        var allTemplates = mappingRepo.GetAllTemplates();
         if (file is null || file.Length == 0)
-        {
             ModelState.AddModelError(string.Empty, "Please choose a file.");
-            return View();
-        }
+        // Template selection is manual and required — no page-count guessing. Block uploads that
+        // don't pick a real template so the pipeline never falls back to an ambiguous default.
+        if (templateId is not > 0 || allTemplates.All(t => t.tpl.TemplateId != templateId))
+            ModelState.AddModelError(string.Empty, "Please choose a template / layout.");
+        if (!ModelState.IsValid)
+            return View(new UploadViewModel
+            {
+                Templates = allTemplates
+                    .Select(t => new UploadTemplateOption(t.tpl.TemplateId, $"{t.tpl.Name} ({t.docType})"))
+                    .ToList()
+            });
 
         var uploadRoot = config["Storage:UploadRoot"] ?? "App_Data/uploads";
         Directory.CreateDirectory(uploadRoot);
@@ -71,7 +87,8 @@ public sealed class DocumentsController(
             SourceChannel = "UPLOAD",
             StatusCode = "CAPTURED",
             UploadedByUserId = userId,
-            OcrLanguages = NormalizeOcrLanguages(ocrLanguages)
+            OcrLanguages = NormalizeOcrLanguages(ocrLanguages),
+            TemplateId = templateId   // required + validated above; the pipeline resolves on this pick
         };
         var docId = documents.Insert(doc);
         documents.LogEvent(docId, "CAPTURE", null, "CAPTURED", "File uploaded", userId);
@@ -162,14 +179,23 @@ public sealed class DocumentsController(
             {
                 var cols = rawCols.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToList();
                 if (cols.Count > 0)
+                {
+                    var rows = LineItemTable.Parse(v.NormalizedValue, cols);
+                    var rowPages = LineItemTable.ReadPageTags(v.NormalizedValue);
+                    while (rowPages.Count < rows.Count) rowPages.Add(1);   // align defensively (legacy rows have no _pg)
+                    var groups = ReviewTableHelpers.GroupByPage(rowPages);
                     table = new ReviewTableModel
                     {
                         Columns = cols.Select(c => new ReviewColumn
                         {
                             SubProperty = c.TargetSubProperty, DataType = c.DataType, IsAnchor = c.IsAnchor
                         }).ToList(),
-                        Rows = LineItemTable.Parse(v.NormalizedValue, cols)
+                        Rows = rows,
+                        RowPages = rowPages,
+                        PageGroups = groups.Select(g => new ReviewTablePageGroup(g.Page, g.FirstRowIndex, g.Count)).ToList(),
+                        IsMultiPage = groups.Count > 1
                     };
+                }
             }
 
             return new ReviewValueModel
@@ -189,6 +215,38 @@ public sealed class DocumentsController(
             };
         }).ToList();
 
+        // Per-physical-page line_item table zone (row->page highlight): which role region owns each page.
+        var pageTableZones = new List<ReviewPageZone>();
+        var tableVal = values.FirstOrDefault(x => x.Table is not null);
+        if (tableVal is not null && template is not null)
+        {
+            var tableFields = template.Fields
+                .Where(f => string.Equals(f.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)
+                         && string.Equals(f.TargetProperty, tableVal.TargetProperty, StringComparison.OrdinalIgnoreCase)
+                         && f.ZoneX is not null)
+                .ToList();
+            int pageCount = Math.Max(1, doc.PageCount);
+
+            ReviewPageZone Zone(int p, MappingField f) => new()
+            { Page = p, X = f.ZoneX!.Value, Y = f.ZoneY ?? 0m, W = f.ZoneW ?? 0m, H = f.ZoneH ?? 0m };
+
+            var byRole = new Dictionary<PageRole, MappingField>();
+            foreach (var f in tableFields)
+                if (PageRoleResolver.TryParse(f.ZonePageRole, out var role)) byRole[role] = f;
+
+            if (byRole.Count > 0)   // multi-page: resolve the region owning each physical page
+            {
+                var available = byRole.Keys.ToHashSet();
+                for (int p = 1; p <= pageCount; p++)
+                    if (PageRoleResolver.PickTableRole(available, p, pageCount) is { } role)
+                        pageTableZones.Add(Zone(p, byRole[role]));
+            }
+            else   // legacy single-page table field -> its own page
+            {
+                foreach (var f in tableFields) pageTableZones.Add(Zone(f.ZonePage ?? 1, f));
+            }
+        }
+
         return View(new ReviewViewModel
         {
             Document = doc,
@@ -197,7 +255,8 @@ public sealed class DocumentsController(
             OverallConfidence = result.Value.overall,
             Cutoff = cutoff,
             PageCount = doc.PageCount,
-            Values = values
+            Values = values,
+            PageTableZones = pageTableZones
         });
     }
 

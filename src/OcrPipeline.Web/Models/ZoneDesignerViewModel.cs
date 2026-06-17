@@ -33,6 +33,9 @@ public sealed class ZoneFieldModel
     public string? ZoneOcrHint { get; set; }
     public byte? ZonePsm { get; set; }
 
+    /// <summary>Multi-page page-role (Phase 3): FIRST/CONTINUATION/LAST; null = single-page/legacy.</summary>
+    public string? ZonePageRole { get; set; }
+
     /// <summary>Sub-columns when this is the line_item table field (SourceType == TABLE_CELL).</summary>
     public List<ZoneColumnModel> Columns { get; set; } = new();
 }
@@ -58,6 +61,9 @@ public sealed class ZonesSavePayload
     public int TemplateId { get; set; }
     public string MappingMode { get; set; } = "OCR_FIRST";
     public List<ZoneFieldPayload> Fields { get; set; } = new();
+    /// <summary>Saved fields the user removed in the designer (e.g. a redundant page-region). Deleted
+    /// FK-safely — a field still referenced by a stored extraction result is left untouched.</summary>
+    public List<int> RemovedFieldIds { get; set; } = new();
 }
 
 public sealed class ZoneFieldPayload
@@ -76,6 +82,7 @@ public sealed class ZoneFieldPayload
     public decimal? ZoneH { get; set; }
     public string? ZoneOcrHint { get; set; }
     public byte? ZonePsm { get; set; }
+    public string? ZonePageRole { get; set; }   // FIRST/CONTINUATION/LAST (Phase 3)
 
     public List<ZoneColumnPayload> Columns { get; set; } = new();
 }

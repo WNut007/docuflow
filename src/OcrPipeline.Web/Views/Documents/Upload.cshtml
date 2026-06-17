@@ -1,3 +1,4 @@
+@model OcrPipeline.Web.Models.UploadViewModel
 @{
     ViewData["Title"] = "Upload";
 }
@@ -15,6 +16,20 @@
                         <input type="file" name="file" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.tiff" required />
                         <div class="form-text">
                             On upload the pipeline runs: classify → OCR (text + tables) → map to model.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Template / layout</label>
+                        <select name="templateId" class="form-select" required>
+                            <option value="" disabled selected>Choose a template…</option>
+                            @foreach (var t in Model.Templates)
+                            {
+                                <option value="@t.TemplateId">@t.Label</option>
+                            }
+                        </select>
+                        <div class="form-text">
+                            Pick the layout this document matches. Multi-page templates assign page roles
+                            (first / continuation / last) automatically by page position.
                         </div>
                     </div>
                     <div class="mb-3">

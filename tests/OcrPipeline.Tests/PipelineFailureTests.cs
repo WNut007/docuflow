@@ -50,6 +50,9 @@ public sealed class PipelineFailureTests
     private sealed class NullMappingRepository : IMappingRepository
     {
         public MappingTemplate? GetActiveTemplateForType(int documentTypeId) => null;
+        // no candidates -> resolver returns null -> OCR-first path -> EXTRACT (throwing engine) is reached
+        public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int t) => Array.Empty<TemplateResolver.Candidate>();
+        public int CreateTemplate(int dt, string name, string model, string mode) => throw new NotSupportedException();
         public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int t) => throw new NotSupportedException();
         public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
         public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
@@ -60,6 +63,7 @@ public sealed class PipelineFailureTests
         public int UpsertFieldBinding(int t, MappingField f, bool b) => throw new NotSupportedException();
         public void SaveZones(int t, string mappingMode, IEnumerable<MappingField> f) => throw new NotSupportedException();
         public int SaveTableZone(int t, MappingField f, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
+        public int DeleteZoneFields(int t, IEnumerable<int> ids) => throw new NotSupportedException();
         public long SaveResult(long d, MappingOutcome o) => throw new NotSupportedException();
         public (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long d) => throw new NotSupportedException();
         public int UpdateResultValue(long d, long rv, string? n) => throw new NotSupportedException();

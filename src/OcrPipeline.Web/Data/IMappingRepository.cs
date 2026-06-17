@@ -14,6 +14,14 @@ public interface IMappingRepository
     Dictionary<int, List<MappingTableColumn>> GetTableColumns(int templateId);
     void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> columns);
     MappingTemplate? GetActiveTemplateForType(int documentTypeId);
+
+    /// <summary>All templates of a type as selection candidates (incl. whether each is multi-page),
+    /// for <see cref="OcrPipeline.Web.Services.Mapping.TemplateResolver"/>.</summary>
+    IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int documentTypeId);
+
+    /// <summary>Creates an empty template for a document type; returns the new TemplateId.</summary>
+    int CreateTemplate(int documentTypeId, string name, string targetModel, string mappingMode);
+
     IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates();
     MappingTemplate? GetTemplateById(int templateId);
     IReadOnlyList<string> GetPropertyKeysForType(int documentTypeId);
@@ -40,6 +48,13 @@ public interface IMappingRepository
     /// (x-boundaries / anchor / line rule) in one transaction. Returns the field id (new on insert).
     /// </summary>
     int SaveTableZone(int templateId, MappingField tableField, IEnumerable<MappingTableColumn> columns);
+
+    /// <summary>
+    /// Deletes designer fields the user removed (and their sub-columns), within the template. FK-safe:
+    /// a field still referenced by a stored extraction result (FK_MRV_Field) is skipped, never
+    /// cascaded — history is preserved. Returns the number actually deleted.
+    /// </summary>
+    int DeleteZoneFields(int templateId, IEnumerable<int> fieldIds);
 
     long SaveResult(long documentId, MappingOutcome outcome);
     (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long documentId);

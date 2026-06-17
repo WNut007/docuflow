@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Services.Imaging;
@@ -28,7 +29,8 @@ public sealed class ZonalExtractionService(
     PagePreviewRenderer previewRenderer,
     MappingEngine mappingEngine,
     TextNormalizer normalizer,
-    IOptions<TesseractOptions> tessOptions)
+    IOptions<TesseractOptions> tessOptions,
+    ILogger<ZonalExtractionService> logger)
 {
     private readonly TesseractOptions _o = tessOptions.Value;
 
@@ -77,6 +79,103 @@ public sealed class ZonalExtractionService(
 
         return await mappingEngine.RunZonalAsync(template, results, steps, tableResults, ct);
     }
+
+    /// <summary>
+    /// Pure-ish MULTI-PAGE core (Phase 3) with the same delegate seams as <see cref="BuildAsync"/> so
+    /// it is offline-testable. Page roles are by POSITION (<see cref="PageRoleResolver"/>): scalar
+    /// header/total zones are read ONCE on the page their role owns (FIRST=p1, LAST=last page); each
+    /// physical page's table region (one per page, role-resolved with fallback) is OCR'd and its rows
+    /// CONCATENATED into one line_item list (<see cref="MultiPageTable.Concat"/>) emitted under the
+    /// group's canonical field id. A 1-page doc resolves to FIRST+LAST on the one page.
+    /// </summary>
+    public async Task<MappingOutcome> BuildMultiPageAsync(
+        MappingTemplate template,
+        int totalPages,
+        Func<MappingField, int, Task<(string Raw, decimal Conf)>> ocrScalarOnPage,
+        Func<MappingField, IReadOnlyList<MappingTableColumn>, int, Task<TableResult>> ocrTableOnPage,
+        IReadOnlyDictionary<int, List<TransformerStep>> steps,
+        IReadOnlyDictionary<int, List<MappingTableColumn>>? columnsByField = null,
+        CancellationToken ct = default)
+    {
+        totalPages = Math.Max(1, totalPages);
+        var results = new Dictionary<int, (string Raw, decimal Conf)>();
+        var tableResults = new Dictionary<int, (List<Dictionary<string, object?>> Rows, decimal? Conf)>();
+
+        // Scalar header/total zones: read once, on the first page their role occupies.
+        foreach (var field in template.Fields)
+        {
+            if (field.ZoneX is null) continue;
+            if (string.Equals(field.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase)) continue;
+
+            int? page = FirstPageForRole(PageRoleResolver.Parse(field.ZonePageRole), totalPages);
+            if (page is null) continue;   // role never occurs in this doc (e.g. CONTINUATION when N<3)
+            ct.ThrowIfCancellationRequested();
+            results[field.FieldId] = await ocrScalarOnPage(field, page.Value);
+        }
+
+        // Table regions grouped by TargetProperty (the role-tagged FIRST/CONTINUATION/LAST regions of
+        // one line_item table). One region per physical page; rows concatenated in page order.
+        var tableFields = template.Fields
+            .Where(f => f.ZoneX is not null && string.Equals(f.SourceType, "TABLE_CELL", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        List<MappingTableColumn> ActiveCols(int fieldId) =>
+            columnsByField is not null && columnsByField.TryGetValue(fieldId, out var raw)
+                ? raw.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToList()
+                : new List<MappingTableColumn>();
+
+        foreach (var group in tableFields.GroupBy(f => f.TargetProperty, StringComparer.OrdinalIgnoreCase))
+        {
+            var byRole = new Dictionary<PageRole, MappingField>();
+            foreach (var f in group) byRole[PageRoleResolver.Parse(f.ZonePageRole)] = f;   // designer prevents dup roles
+            var available = byRole.Keys.ToHashSet();
+
+            // canonical emitter AND the authoritative column STRUCTURE: the FIRST region if drawn,
+            // else the lowest field id in the group.
+            var canonical = byRole.TryGetValue(PageRole.First, out var firstRegion)
+                ? firstRegion : group.OrderBy(f => f.FieldId).First();
+            var canonicalCols = ActiveCols(canonical.FieldId);
+
+            var perPage = new List<(int Page, List<Dictionary<string, object?>> Rows, decimal? Conf)>();
+            for (int p = 1; p <= totalPages; p++)
+            {
+                var role = PageRoleResolver.PickTableRole(available, p, totalPages);
+                if (role is null) continue;
+                var region = byRole[role.Value];
+                var regionCols = ActiveCols(region.FieldId);
+                if (regionCols.Count == 0) continue;
+
+                // Impose the canonical (FIRST) column STRUCTURE on this region's x-GEOMETRY so a drifted
+                // sibling can't change the output's keys/types; on a column-count mismatch fall back to
+                // the region's own columns and surface it.
+                var cols = MultiPageColumns.Resolve(canonicalCols, regionCols, out var mismatch);
+                if (mismatch)
+                    logger.LogWarning(
+                        "Multi-page table '{Property}': region role {Role} has {RegionCount} columns vs canonical {CanonicalCount} on page {Page}; using the region's own columns.",
+                        canonical.TargetProperty, role.Value, regionCols.Count, canonicalCols.Count, p);
+
+                ct.ThrowIfCancellationRequested();
+                var tr = await ocrTableOnPage(region, cols, p);
+                perPage.Add((p, tr.Rows, tr.Conf));
+            }
+
+            var merged = MultiPageTable.Concat(perPage);
+            tableResults[canonical.FieldId] = (merged.Rows, merged.Conf);
+        }
+
+        return await mappingEngine.RunZonalAsync(
+            template, results, steps, tableResults.Count > 0 ? tableResults : null, ct);
+    }
+
+    /// <summary>The page a role-tagged SCALAR field is read on (once): FIRST=1, LAST=last page,
+    /// CONTINUATION=first middle page (null when the doc has no middle page).</summary>
+    private static int? FirstPageForRole(PageRole role, int totalPages) => role switch
+    {
+        PageRole.First => 1,
+        PageRole.Last => totalPages,
+        PageRole.Continuation => totalPages >= 3 ? 2 : (int?)null,
+        _ => 1
+    };
 
     /// <summary>
     /// Segment a table zone's word boxes into rows (anchor-validated) and read each cell via
@@ -193,6 +292,60 @@ public sealed class ZonalExtractionService(
                 },
                 columnsByField,
                 ct);
+        }
+        finally
+        {
+            foreach (var p in preparedPages.Values) p.Dispose();
+            foreach (var f in tempPageFiles) if (File.Exists(f)) File.Delete(f);
+        }
+    }
+
+    /// <summary>Production MULTI-PAGE path (Phase 3): same per-zone / per-cell OCR primitives as
+    /// <see cref="ProcessAsync"/>, but the page each zone is read on is driven by page-role position
+    /// (<see cref="BuildMultiPageAsync"/>), with line_item rows concatenated across pages.</summary>
+    public async Task<MappingOutcome> ProcessMultiPageAsync(
+        Document doc,
+        MappingTemplate template,
+        IReadOnlyDictionary<int, List<TransformerStep>> steps,
+        IReadOnlyDictionary<int, List<MappingTableColumn>>? columnsByField = null,
+        CancellationToken ct = default)
+    {
+        var preparedPages = new Dictionary<int, Image<L8>>();
+        var tempPageFiles = new List<string>();
+        try
+        {
+            return await BuildMultiPageAsync(template, Math.Max(1, doc.PageCount),
+                ocrScalarOnPage: async (field, pageNo) =>
+                {
+                    var page = GetPreparedPage(doc, pageNo, preparedPages, tempPageFiles);
+                    var rect = ZoneGeometry.ToPixelRect(
+                        field.ZoneX!.Value, field.ZoneY ?? 0m, field.ZoneW ?? 0m, field.ZoneH ?? 0m,
+                        page.Width, page.Height);
+                    var (psm, whitelist) = ZoneHint.Resolve(field.ZoneOcrHint, field.ZonePsm);
+                    return await CropAndReadAsync(page, rect, psm, whitelist, doc.OcrLanguages, ct);
+                },
+                ocrTableOnPage: async (field, cols, pageNo) =>
+                {
+                    var page = GetPreparedPage(doc, pageNo, preparedPages, tempPageFiles);
+                    var zoneRect = ZoneGeometry.ToPixelRect(
+                        field.ZoneX!.Value, field.ZoneY ?? 0m, field.ZoneW ?? 0m, field.ZoneH ?? 0m,
+                        page.Width, page.Height);
+                    double zoneX = (double)(field.ZoneX ?? 0m), zoneW = (double)(field.ZoneW ?? 0m);
+
+                    var (words, profile) = await ReadZoneWordsAndProfileAsync(page, zoneRect, doc.OcrLanguages, ct);
+                    var boxes = words.Select(w => new WordBox(w.Text, w.X, w.Y, w.W, w.H, w.Conf)).ToList();
+
+                    return await BuildTableRowsAsync(field, cols, boxes, profile,
+                        readCell: async (_, col, band) =>
+                        {
+                            double relS = TableGeometry.ToZoneRelativeX((double)(col.ColXStart ?? (decimal)zoneX), zoneX, zoneW);
+                            double relE = TableGeometry.ToZoneRelativeX((double)(col.ColXEnd ?? (decimal)(zoneX + zoneW)), zoneX, zoneW);
+                            var cellRect = TableGeometry.CellPixelRect(zoneRect, relS, relE, band);
+                            var (cpsm, cwl) = ColumnOcr(col);
+                            return await CropAndReadAsync(page, cellRect, cpsm, cwl, doc.OcrLanguages, ct);
+                        }, ct);
+                },
+                steps, columnsByField, ct);
         }
         finally
         {

@@ -32,7 +32,7 @@ src/OcrPipeline.Web/            root namespace OcrPipeline.Web
   Security/                     Pbkdf2PasswordHasher
   Domain/Entities.cs            POCOs incl. OcrExtraction
   Data/                         SqlConnectionFactory + Dapper repositories
-  Services/Ocr/                 IOcrEngine + TesseractOcrEngine (stub) + GoogleDocumentAiEngine (real)
+  Services/Ocr/                 IOcrEngine + TesseractOcrEngine (real, libtesseract tha+eng) + GoogleDocumentAiEngine (real)
   Services/Transform/           IValueTransformer + built-ins + TransformerPipeline
   Services/Mapping/             MappingEngine (resolve field → model)
   Services/                     ExtractionService, PipelineService (orchestrator)
@@ -120,6 +120,26 @@ NuGet: `Google.Cloud.DocumentAI.V1` — verify the version pin against nuget.org
   1) Front and rear brake cables · qty 1 · unit 100.00 · amount 100.00
   2) New set of pedal arms · qty 2 · unit 15.00 · amount 30.00
   3) Labor 3hrs · qty 3 · unit 5.00 · amount 15.00
+
+## Multi-page sample (ground truth) — Phase 3
+`samples/multipage-invoice.html` → render to `samples/multipage-invoice.pdf` (see the comment at the
+top of the HTML for the headless-Chrome / wkhtmltopdf command; the app rasterizes PDFs per page).
+A **3-page** invoice exercising position-based page roles (FIRST / CONTINUATION / LAST):
+- p1 **FIRST** = header (invoice_no `INV-2024-777`, date `2019-02-11`, PO `PO-5521`) + items 1–5
+- p2 **CONTINUATION** = items 6–10 (no header/totals)
+- p3 **LAST** = items 11–12 + totals (subtotal `200.00`, tax `14.00`, total `214.00`)
+- `line_item` (12 rows, concatenated across pages in order): Widget A qty1 10.00 10.00; B 2 5.00 10.00;
+  C 1 20.00 20.00; D 3 4.00 12.00; E 2 8.00 16.00; F 1 15.00 15.00; G 5 2.00 10.00; H 1 25.00 25.00;
+  I 2 6.00 12.00; J 4 3.00 12.00; K 1 30.00 30.00; L 2 9.00 18.00
+
+**Page-role model**: zones carry a `ZonePageRole` (FIRST/CONTINUATION/LAST; null = single-page/legacy).
+Roles are by POSITION (`Services/Zonal/PageRoleResolver`): page 1 = FIRST, last = LAST, middle =
+CONTINUATION; a single-page doc is FIRST **and** LAST on the one page. Header zones read once (FIRST),
+totals once (LAST); each page's table region (one per page, role-resolved with LAST→CONTINUATION→FIRST
+fallback) is OCR'd and its rows concatenated into one `line_item` list. A template is **multi-page mode**
+when any field has a non-null role; templates with all-null roles stay on the unchanged single-page path
+(`ZonalExtractionService.ProcessAsync`). The `line_item` table is defined by up to 3 role-tagged
+`TABLE_CELL` fields sharing one `TargetProperty` — emitted once by the canonical (FIRST) field.
 
 ## Point-and-click mapping (target UX — for non-technical users)
 LEFT = page image with clickable OCR bounding boxes (hover shows the text).

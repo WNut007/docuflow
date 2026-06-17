@@ -41,6 +41,8 @@ public sealed class ExportServiceTests
         public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
         public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
         public MappingTemplate? GetActiveTemplateForType(int t) => throw new NotSupportedException();
+        public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int t) => throw new NotSupportedException();
+        public int CreateTemplate(int dt, string name, string model, string mode) => throw new NotSupportedException();
         public IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates() => throw new NotSupportedException();
         public MappingTemplate? GetTemplateById(int t) => throw new NotSupportedException();
         public IReadOnlyList<string> GetPropertyKeysForType(int t) => throw new NotSupportedException();
@@ -48,6 +50,7 @@ public sealed class ExportServiceTests
         public int UpsertFieldBinding(int t, MappingField f, bool b) => throw new NotSupportedException();
         public void SaveZones(int t, string mappingMode, IEnumerable<MappingField> f) => throw new NotSupportedException();
         public int SaveTableZone(int t, MappingField f, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
+        public int DeleteZoneFields(int t, IEnumerable<int> ids) => throw new NotSupportedException();
         public long SaveResult(long d, MappingOutcome o) => throw new NotSupportedException();
         public int UpdateResultValue(long d, long rv, string? n) => throw new NotSupportedException();
     }

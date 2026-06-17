@@ -13,6 +13,10 @@ namespace OcrPipeline.Web.Services.Mapping;
 /// </summary>
 public static class LineItemTable
 {
+    /// <summary>Reserved per-row key carrying the source page (Phase 3 multi-page). Display/highlight
+    /// only — ignored by cell parsing, preserved across the round-trip, and stripped before export.</summary>
+    public const string ReservedPageKey = "_pg";
+
     /// <summary>Parse the stored typed JSON array into display-string rows keyed by sub-property.
     /// Numbers use their raw JSON text (preserves scale); strings use their value; missing/null -> "".</summary>
     public static List<Dictionary<string, string>> Parse(string? json, IReadOnlyList<MappingTableColumn> cols)
@@ -48,6 +52,28 @@ public static class LineItemTable
         return rows;
     }
 
+    /// <summary>Read the reserved per-row page marker (<see cref="ReservedPageKey"/>) for each row, in
+    /// order; a missing/invalid marker -> 1 (single-page/legacy). Parallel to <see cref="Parse"/>.</summary>
+    public static List<int> ReadPageTags(string? json)
+    {
+        var pages = new List<int>();
+        if (string.IsNullOrWhiteSpace(json)) return pages;
+
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return pages;
+
+        foreach (var rowEl in doc.RootElement.EnumerateArray())
+        {
+            int pg = 1;
+            if (rowEl.ValueKind == JsonValueKind.Object
+                && rowEl.TryGetProperty(ReservedPageKey, out var pgEl)
+                && pgEl.ValueKind == JsonValueKind.Number && pgEl.TryGetInt32(out var v) && v >= 1)
+                pg = v;
+            pages.Add(pg);
+        }
+        return pages;
+    }
+
     /// <summary>Rebuild typed rows from edited display strings, typing each cell per its column's
     /// DataType via <paramref name="typeCell"/> (wire to <see cref="MappingEngine.NormalizeTyped"/>).
     /// The caller serializes the result with System.Text.Json to get the stored JSON.</summary>
@@ -65,6 +91,9 @@ public static class LineItemTable
                 row.TryGetValue(col.TargetSubProperty, out var raw);
                 obj[col.TargetSubProperty] = typeCell(col.DataType, raw);
             }
+            // preserve page provenance through the round-trip (survives edit/delete/reorder)
+            if (row.TryGetValue(ReservedPageKey, out var pg) && int.TryParse(pg, out var pgi) && pgi >= 1)
+                obj[ReservedPageKey] = pgi;
             result.Add(obj);
         }
         return result;

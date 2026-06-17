@@ -23,7 +23,8 @@ public sealed class ZonalResolveTests
             new TransformerPipeline(new IValueTransformer[] { new TrimTransformer() }),
             new TextNormalizer());
         // image deps are unused by BuildAsync
-        return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()));
+        return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ZonalExtractionService>.Instance);
     }
 
     private static MappingField Field(int id, string prop, string dataType, bool required = false) => new()

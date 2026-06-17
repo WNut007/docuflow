@@ -87,6 +87,27 @@ public sealed class LineItemTableTests
     }
 
     [Fact]
+    public void ReadPageTags_reads_pg_or_defaults_to_one()
+    {
+        const string json = """[{"qty":1,"_pg":1},{"qty":2,"_pg":3},{"qty":3}]""";
+        Assert.Equal(new[] { 1, 3, 1 }, LineItemTable.ReadPageTags(json).ToArray());   // missing -> 1
+        Assert.Empty(LineItemTable.ReadPageTags(null));
+    }
+
+    [Fact]
+    public void BuildTypedRows_preserves_page_marker_through_round_trip()
+    {
+        var rows = new List<IReadOnlyDictionary<string, string>>
+        {
+            new Dictionary<string, string> { ["qty"] = "1", ["description"] = "a", ["_pg"] = "2" },
+        };
+        var typed = LineItemTable.BuildTypedRows(Cols, rows, Typer());
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(typed));
+        Assert.Equal(2, doc.RootElement[0].GetProperty("_pg").GetInt32());                 // provenance survives
+        Assert.Equal(JsonValueKind.Number, doc.RootElement[0].GetProperty("qty").ValueKind); // cells still typed
+    }
+
+    [Fact]
     public void A_string_typed_amount_column_emits_a_quoted_string()
     {
         // matches current graceful extraction behavior: a STRING column keeps a number-looking value as text

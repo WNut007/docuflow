@@ -36,6 +36,21 @@
                  background: rgba(13,110,253,.14); box-shadow: 0 0 0 2px rgba(13,110,253,.35); z-index: 5; }
 .li-table input.li-cell { min-width: 4rem; }
 
+/* Multi-page line-item review: ONE bounded, scrollable table with a sticky header */
+.li-scroll { max-height: clamp(22rem, 65vh, 600px); overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: .25rem; }
+.li-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bs-body-bg);
+                     box-shadow: inset 0 -1px 0 var(--bs-border-color); }
+.li-pgcol { width: 2.2rem; text-align: center; }
+.li-delcol { width: 1.8rem; }
+.li-row.li-junk td { background: rgba(220,53,69,.10); }
+.li-row.li-junk input.li-cell { border-color: rgba(220,53,69,.6); }
+.li-pagejump { display: flex; flex-wrap: wrap; gap: .25rem; }
+.li-jump { cursor: pointer; font-weight: 500; }
+
+/* Zone designer: a line_item table card groups its page-regions (name lives once on the table) */
+.zone-table-card { background: var(--bs-tertiary-bg); }
+.li-jump.li-jump-active { background: var(--bs-primary) !important; color: #fff !important; }
+
 /* Zone designer (zonal / template-based OCR) */
 .zone-stage { cursor: crosshair; user-select: none; -webkit-user-select: none; }
 .zone-box { position: absolute; border: 2px solid rgba(13,110,253,.8); background: rgba(13,110,253,.10);

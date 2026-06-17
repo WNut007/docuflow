@@ -20,6 +20,8 @@ public sealed class Document
     public string Sha256 { get; set; } = "";
     public string SourceChannel { get; set; } = "UPLOAD";
     public int? DocumentTypeId { get; set; }
+    /// <summary>Template the document is processed with; null = let the pipeline resolve by page count.</summary>
+    public int? TemplateId { get; set; }
     public decimal? ClassifyConfidence { get; set; }
     public string StatusCode { get; set; } = "CAPTURED";
     public int PageCount { get; set; }
