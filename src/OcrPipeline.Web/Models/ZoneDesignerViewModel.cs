@@ -13,7 +13,6 @@ public sealed class ZoneDesignerViewModel
 
     public List<ZoneFieldModel> Fields { get; set; } = new();
     public IReadOnlyList<TemplateOption> TemplateOptions { get; set; } = Array.Empty<TemplateOption>();
-    public IReadOnlyList<DocumentOption> Documents { get; set; } = Array.Empty<DocumentOption>();
 }
 
 public sealed class ZoneFieldModel

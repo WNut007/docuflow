@@ -176,7 +176,7 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
     {
         using var db = factory.Create();
         const string tplSql = """
-            SELECT TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive, MappingMode
+            SELECT TemplateId, DocumentTypeId, Name, TargetModel, Version, IsActive, MappingMode, SampleDocumentId
             FROM dbo.MappingTemplate WHERE TemplateId = @TemplateId;
             """;
         var tpl = db.QuerySingleOrDefault<MappingTemplate>(tplSql, new { TemplateId = templateId });

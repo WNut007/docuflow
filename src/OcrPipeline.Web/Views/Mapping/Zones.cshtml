@@ -8,7 +8,6 @@
         documentId = Model.DocumentId,
         pageCount = Model.PageCount,
         fields = Model.Fields,
-        documents = Model.Documents,
         templateOptions = Model.TemplateOptions
     };
 }
@@ -31,14 +30,7 @@
         <div class="card h-100">
             <div class="card-header d-flex align-items-center gap-2">
                 <i class="bi bi-file-earmark-image"></i>
-                <select id="docSelect" class="form-select form-select-sm" style="max-width: 320px;">
-                    @foreach (var d in Model.Documents)
-                    {
-                        <option value="@d.DocumentId" selected="@(d.DocumentId == Model.DocumentId)">
-                            @d.FileName (@d.PageCount p.)
-                        </option>
-                    }
-                </select>
+                <span class="small text-body-secondary">Sample document</span>
                 <div class="ms-auto btn-group btn-group-sm" id="pager" role="group">
                     <button type="button" class="btn btn-outline-secondary" id="prevPage"><i class="bi bi-chevron-left"></i></button>
                     <span class="btn btn-outline-secondary disabled" id="pageLabel">1 / @Model.PageCount</span>
@@ -52,7 +44,8 @@
                 </div>
                 <div id="noDoc" class="text-center text-body-secondary py-5 d-none">
                     <i class="bi bi-inbox fs-3 d-block mb-2"></i>
-                    No previewed document of this type yet. Upload one to design zones.
+                    This template has no sample yet.
+                    <a asp-action="Index">Create a template</a> with a sample to draw zones over.
                 </div>
             </div>
         </div>

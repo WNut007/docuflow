@@ -238,14 +238,14 @@ public sealed class MappingController(
     // ---- Zone designer (template-based / zonal OCR) -----------------------
 
     [HttpGet]
-    public IActionResult Zones(int templateId, long? documentId)
+    public IActionResult Zones(int templateId)
     {
         var tpl = mapping.GetTemplateById(templateId);
         if (tpl is null) return NotFound();
 
-        var docs = documents.GetByTypeWithPreviews(tpl.DocumentTypeId);
-        long? docId = documentId ?? docs.FirstOrDefault()?.DocumentId;
-        int pageCount = docs.FirstOrDefault(d => d.DocumentId == docId)?.PageCount ?? 0;
+        // The designer draws on the template's OWN bound sample (no doc-picker). NULL => empty-state.
+        long? docId = tpl.SampleDocumentId;
+        int pageCount = docId is long sample ? documents.GetById(sample)?.PageCount ?? 0 : 0;
 
         // list ALL templates (not only active) so any layout can be edited without one clobbering another
         var templateOptions = mapping.GetAllTemplates()
@@ -263,7 +263,6 @@ public sealed class MappingController(
             DocumentId = docId,
             PageCount = pageCount,
             TemplateOptions = templateOptions,
-            Documents = docs.Select(d => new DocumentOption(d.DocumentId, d.FileName, d.PageCount)).ToList(),
             Fields = tpl.Fields.Select(f => new ZoneFieldModel
             {
                 FieldId = f.FieldId,

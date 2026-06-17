@@ -495,7 +495,6 @@
     // ---- wiring ---------------------------------------------------------------
     $("modeSelect").value = state.mappingMode;
     $("modeSelect").addEventListener("change", e => { state.mappingMode = e.target.value; });
-    $("docSelect").addEventListener("change", e => { state.documentId = Number(e.target.value); state.page = 1; loadDoc(); });
     $("templateSelect").addEventListener("change", e => { location.href = `/Mapping/Zones?templateId=${e.target.value}`; });
     $("prevPage").addEventListener("click", () => { if (state.page > 1) { state.page--; loadDoc(); } });
     $("nextPage").addEventListener("click", () => { if (state.page < state.pageCount) { state.page++; loadDoc(); } });
