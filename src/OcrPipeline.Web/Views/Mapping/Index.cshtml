@@ -10,13 +10,25 @@
     <div class="card card-body">
         <form method="post" asp-action="CreateTemplate" class="row g-2 align-items-end">
             @Html.AntiForgeryToken()
-            <div class="col-md-5">
+            <div class="col-md-4">
                 <label class="form-label small mb-0">Name</label>
                 <input name="name" class="form-control form-control-sm" placeholder="e.g. Invoice — Acme single page" required />
             </div>
-            <div class="col-md-2">
-                <label class="form-label small mb-0">Doc type</label>
-                <input name="documentTypeId" type="number" value="1" class="form-control form-control-sm" />
+            <div class="col-md-3">
+                <label class="form-label small mb-0">Document type</label>
+                <select name="documentTypeId" class="form-select form-select-sm" required>
+                @foreach (var dt in (IReadOnlyList<(int Id, string Name)>)(ViewBag.DocTypes ?? new List<(int, string)>()))
+                {
+                    if (dt.Id == 1)
+                    {
+                        <option value="@dt.Id" selected>@dt.Name</option>
+                    }
+                    else
+                    {
+                        <option value="@dt.Id">@dt.Name</option>
+                    }
+                }
+                </select>
             </div>
             <div class="col-md-3">
                 <label class="form-label small mb-0">Mode</label>

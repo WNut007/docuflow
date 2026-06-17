@@ -23,6 +23,10 @@ public interface IMappingRepository
     int CreateTemplate(int documentTypeId, string name, string targetModel, string mappingMode);
 
     IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates();
+
+    /// <summary>Active document types (Id + display name) for the New-template picker.</summary>
+    IReadOnlyList<(int Id, string Name)> GetDocumentTypes();
+
     MappingTemplate? GetTemplateById(int templateId);
     IReadOnlyList<string> GetPropertyKeysForType(int documentTypeId);
     void SaveFields(int templateId, IEnumerable<MappingField> fields,

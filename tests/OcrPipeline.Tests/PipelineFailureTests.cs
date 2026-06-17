@@ -57,6 +57,7 @@ public sealed class PipelineFailureTests
         public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
         public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();
         public IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates() => throw new NotSupportedException();
+        public IReadOnlyList<(int Id, string Name)> GetDocumentTypes() => throw new NotSupportedException();
         public MappingTemplate? GetTemplateById(int t) => throw new NotSupportedException();
         public IReadOnlyList<string> GetPropertyKeysForType(int t) => throw new NotSupportedException();
         public void SaveFields(int t, IEnumerable<MappingField> f, IReadOnlyDictionary<int, List<TransformerStep>> s) => throw new NotSupportedException();
