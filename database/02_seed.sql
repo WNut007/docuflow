@@ -16,7 +16,10 @@ USING (VALUES
     ('NEEDS_REVIEW',N'Needs Review',  55),
     ('MAPPED',      N'Mapped',        60),
     ('CONSUMED',    N'Consumed',      70),
-    ('FAILED',      N'Failed',        99)
+    ('FAILED',      N'Failed',        99),
+    -- Non-pipeline: a template's zone-designer backdrop (Document.StatusCode='SAMPLE');
+    -- never processed (the queue worker selects only 'CAPTURED'). See 12_sample_status.sql.
+    ('SAMPLE',      N'Sample (template backdrop)', 5)
 ) AS s(StatusCode, DisplayName, SortOrder)
 ON t.StatusCode = s.StatusCode
 WHEN NOT MATCHED THEN
