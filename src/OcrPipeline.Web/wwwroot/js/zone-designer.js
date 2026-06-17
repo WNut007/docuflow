@@ -450,7 +450,9 @@
     }
 
     // ---- save -----------------------------------------------------------------
+    let saving = false;
     async function save() {
+        if (saving) return;                          // ignore double-clicks / concurrent submits
         const payload = {
             templateId: state.templateId,
             mappingMode: state.mappingMode,
@@ -476,19 +478,31 @@
         if (state.mappingMode === "ZONAL" && payload.fields.length === 0) {
             setStatus("Draw at least one zone before saving in ZONAL mode."); return;
         }
+        saving = true;
+        $("saveBtn").disabled = true;
         setStatus("Saving…");
-        const res = await fetch("/Mapping/ZonesSave", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-            state.removedFieldIds = [];           // applied — clear the pending deletions
-            setStatus(`Saved (${state.mappingMode}).`);
-        } else {
+        try {
+            const res = await fetch("/Mapping/ZonesSave", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                state.removedFieldIds = [];           // applied — clear the pending deletions
+                // Reload so freshly-drawn fields (FieldId=0 client-side) come back with their
+                // server-assigned FieldIds; otherwise a second save would re-INSERT them (dup fields).
+                setStatus("Saved — reloading…");
+                location.reload();
+                return;
+            }
             let msg = "Save failed (" + res.status + ").";
             try { const j = await res.json(); if (j && j.error) msg = j.error; } catch { /* non-JSON */ }
             setStatus(msg);
+        } catch (e) {
+            setStatus("Save failed: " + (e && e.message ? e.message : e));
+        } finally {
+            saving = false;
+            $("saveBtn").disabled = false;
         }
     }
 
