@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
 using OcrPipeline.Web.Controllers;
 using OcrPipeline.Web.Data;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
+using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Transform;
 using Xunit;
@@ -37,6 +39,7 @@ public sealed class VisualSavePartialTests
         public MappingTemplate? GetActiveTemplateForType(int t) => throw new NotSupportedException();
         public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int t) => throw new NotSupportedException();
         public int CreateTemplate(int dt, string name, string model, string mode) => throw new NotSupportedException();
+        public void SetTemplateSample(int t, long d) => throw new NotSupportedException();
         public IReadOnlyList<(MappingTemplate tpl, string docType, int fieldCount)> GetAllTemplates() => throw new NotSupportedException();
         public IReadOnlyList<(int Id, string Name)> GetDocumentTypes() => throw new NotSupportedException();
         public MappingTemplate? GetTemplateById(int t) => throw new NotSupportedException();
@@ -64,7 +67,14 @@ public sealed class VisualSavePartialTests
         public void LogEvent(long id, string st, string? f, string to, string? m, int? u) => throw new NotSupportedException();
     }
 
-    private static MappingController NewController(FakeMappingRepository m) => new(m, new StubDocs());
+    private sealed class StubIngestion : IDocumentIngestionService
+    {
+        public Task<long> StoreAndRasterizeAsync(IFormFile file, string sourceChannel, string statusCode,
+            int? templateId, int? userId, string? ocrLanguages, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
+    private static MappingController NewController(FakeMappingRepository m) => new(m, new StubDocs(), new StubIngestion());
 
     [Fact]
     public void Rebinding_only_field_A_leaves_field_B_untouched()

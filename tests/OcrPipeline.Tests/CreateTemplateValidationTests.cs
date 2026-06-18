@@ -5,6 +5,7 @@ using OcrPipeline.Web.Controllers;
 using OcrPipeline.Web.Data;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Models;
+using OcrPipeline.Web.Services;
 using OcrPipeline.Web.Services.Mapping;
 using OcrPipeline.Web.Services.Transform;
 using Xunit;
@@ -12,23 +13,24 @@ using Xunit;
 namespace OcrPipeline.Tests;
 
 /// <summary>
-/// Offline tests for MappingController.CreateTemplate's document-type guard: a submitted
-/// DocumentTypeId that isn't an ACTIVE type must be rejected (no template created), while a valid
-/// active id creates the template and opens the zone designer. This mirrors the New-template
-/// dropdown's orphan-proofing on the server, so a forged/stale POST can't slip a bad id past the FK.
-/// Driven through the IMappingRepository fake — no DB.
+/// Offline tests for MappingController.CreateTemplate's guards: a non-active document type or a
+/// missing sample file must be rejected (nothing created/bound), while valid input creates the
+/// template, stores the sample as a SAMPLE backdrop (not processed), binds it, and opens the
+/// designer. Mirrors the New-template form's orphan-proofing + required-sample on the server.
+/// Driven through fakes - no DB, no file system.
 /// </summary>
 public sealed class CreateTemplateValidationTests
 {
     private sealed class FakeMapping : IMappingRepository
     {
         public List<(int dt, string name)> Created { get; } = [];
+        public (int tpl, long doc)? Bound { get; private set; }
         private static readonly IReadOnlyList<(int Id, string Name)> ActiveTypes =
             [(1, "Invoice"), (2, "Receipt"), (3, "Purchase Order"), (4, "Contract")];
 
         public IReadOnlyList<(int Id, string Name)> GetDocumentTypes() => ActiveTypes;
-        public int CreateTemplate(int dt, string name, string model, string mode)
-        { Created.Add((dt, name)); return 99; }
+        public int CreateTemplate(int dt, string name, string model, string mode) { Created.Add((dt, name)); return 99; }
+        public void SetTemplateSample(int templateId, long documentId) => Bound = (templateId, documentId);
 
         // not exercised by CreateTemplate
         public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int t) => throw new NotSupportedException();
@@ -47,6 +49,14 @@ public sealed class CreateTemplateValidationTests
         public long SaveResult(long d, MappingOutcome o) => throw new NotSupportedException();
         public (decimal? overall, bool needsReview, string? json, int templateId, List<MappedValueRow> values)? GetLatestResult(long d) => throw new NotSupportedException();
         public int UpdateResultValue(long d, long rv, string? n) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeIngestion : IDocumentIngestionService
+    {
+        public List<string> Channels { get; } = [];
+        public Task<long> StoreAndRasterizeAsync(IFormFile file, string sourceChannel, string statusCode,
+            int? templateId, int? userId, string? ocrLanguages, CancellationToken ct = default)
+        { Channels.Add(sourceChannel); return Task.FromResult(777L); }
     }
 
     private sealed class StubDocs : IDocumentRepository
@@ -69,40 +79,66 @@ public sealed class CreateTemplateValidationTests
         public void SaveTempData(HttpContext context, IDictionary<string, object?> values) { }
     }
 
-    private static MappingController NewController(FakeMapping m) =>
-        new(m, new StubDocs())
+    private static MappingController NewController(FakeMapping m, FakeIngestion ing)
+    {
+        var http = new DefaultHttpContext();   // non-null User (empty principal) so GetUserId() returns null cleanly
+        return new(m, new StubDocs(), ing)
         {
-            TempData = new TempDataDictionary(new DefaultHttpContext(), new NullTempDataProvider())
+            ControllerContext = new ControllerContext { HttpContext = http },
+            TempData = new TempDataDictionary(http, new NullTempDataProvider())
         };
+    }
+
+    private static IFormFile Sample()
+    {
+        var bytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };   // "%PDF"
+        return new FormFile(new MemoryStream(bytes), 0, bytes.Length, "sample", "sample.pdf")
+        { Headers = new HeaderDictionary(), ContentType = "application/pdf" };
+    }
 
     [Theory]
     [InlineData(11)]   // id with no DocumentType row (would FK-fail)
     [InlineData(0)]    // empty/unselected dropdown binds to 0
     [InlineData(99)]   // valid-shape but inactive/nonexistent
-    public void Invalid_document_type_is_rejected_and_creates_nothing(int badId)
+    public async Task Invalid_document_type_is_rejected_and_creates_nothing(int badId)
     {
         var mapping = new FakeMapping();
 
-        var result = NewController(mapping)
-            .CreateTemplate(documentTypeId: badId, name: "Some template", mappingMode: "ZONAL", targetModel: null);
+        var result = await NewController(mapping, new FakeIngestion())
+            .CreateTemplate(badId, name: "Some template", mappingMode: "ZONAL", targetModel: null, sample: Sample(), default);
 
-        Assert.Empty(mapping.Created);                                          // no orphan template created
-        var redirect = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal(nameof(MappingController.Index), redirect.ActionName);     // bounced back to the list
+        Assert.Empty(mapping.Created);                                          // no orphan template
+        Assert.Null(mapping.Bound);                                             // nothing bound
+        Assert.Equal(nameof(MappingController.Index), Assert.IsType<RedirectToActionResult>(result).ActionName);
     }
 
     [Fact]
-    public void Valid_document_type_creates_template_and_opens_designer()
+    public async Task Missing_sample_is_rejected_and_creates_nothing()
     {
         var mapping = new FakeMapping();
 
-        var result = NewController(mapping)
-            .CreateTemplate(documentTypeId: 1, name: "Acme Invoice", mappingMode: "ZONAL", targetModel: null);
+        var result = await NewController(mapping, new FakeIngestion())
+            .CreateTemplate(1, name: "Acme Invoice", mappingMode: "ZONAL", targetModel: null, sample: null, default);
+
+        Assert.Empty(mapping.Created);                                          // sample is required
+        Assert.Null(mapping.Bound);
+        Assert.Equal(nameof(MappingController.Index), Assert.IsType<RedirectToActionResult>(result).ActionName);
+    }
+
+    [Fact]
+    public async Task Valid_input_creates_template_stores_sample_and_opens_designer()
+    {
+        var mapping = new FakeMapping();
+        var ingestion = new FakeIngestion();
+
+        var result = await NewController(mapping, ingestion)
+            .CreateTemplate(1, name: "Acme Invoice", mappingMode: "ZONAL", targetModel: null, sample: Sample(), default);
 
         var created = Assert.Single(mapping.Created);
         Assert.Equal(1, created.dt);
-        Assert.Equal("Acme Invoice", created.name);
-        var redirect = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal(nameof(MappingController.Zones), redirect.ActionName);     // straight into the zone designer
+        Assert.Equal("SAMPLE", Assert.Single(ingestion.Channels));             // stored as backdrop, never processed
+        Assert.Equal(99, mapping.Bound!.Value.tpl);                            // sample bound to the new template id
+        Assert.Equal(777L, mapping.Bound!.Value.doc);
+        Assert.Equal(nameof(MappingController.Zones), Assert.IsType<RedirectToActionResult>(result).ActionName);
     }
 }

@@ -26,9 +26,9 @@ public sealed class DocumentsController(
     IExportRepository exportRepo,
     ProcessorRepository processors,
     IOcrEngine ocrEngine,
-    PagePreviewRenderer previewRenderer,
     MappingEngine mappingEngine,
     TextNormalizer normalizer,
+    IDocumentIngestionService ingestion,
     IConfiguration config) : Controller
 {
     public IActionResult Index()
@@ -63,52 +63,13 @@ public sealed class DocumentsController(
                     .ToList()
             });
 
-        var uploadRoot = config["Storage:UploadRoot"] ?? "App_Data/uploads";
-        Directory.CreateDirectory(uploadRoot);
-
-        var storedName = $"{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
-        var storedPath = Path.Combine(uploadRoot, storedName);
-
-        await using (var fs = System.IO.File.Create(storedPath))
-            await file.CopyToAsync(fs, ct);
-
-        string sha;
-        await using (var read = System.IO.File.OpenRead(storedPath))
-            sha = ExtractionService.ComputeSha256(read);
-
+        // Store + rasterize previews via the shared ingestion service (same path the template-sample
+        // upload uses). The pipeline resolves on the picked templateId.
         var userId = GetUserId();
-        var doc = new Document
-        {
-            OriginalFileName = file.FileName,
-            StoredPath = storedPath,
-            ContentType = file.ContentType,
-            FileSizeBytes = file.Length,
-            Sha256 = sha,
-            SourceChannel = "UPLOAD",
-            StatusCode = "CAPTURED",
-            UploadedByUserId = userId,
-            OcrLanguages = NormalizeOcrLanguages(ocrLanguages),
-            TemplateId = templateId   // required + validated above; the pipeline resolves on this pick
-        };
-        var docId = documents.Insert(doc);
+        var docId = await ingestion.StoreAndRasterizeAsync(
+            file!, sourceChannel: "UPLOAD", statusCode: "CAPTURED",   // non-null past the ModelState guard above
+            templateId, userId, NormalizeOcrLanguages(ocrLanguages), ct);
         documents.LogEvent(docId, "CAPTURE", null, "CAPTURED", "File uploaded", userId);
-
-        // rasterize page previews (PDF -> per-page PNG; image -> single PNG) for the mapping UI
-        try
-        {
-            var dpi = config.GetValue<int?>("Storage:PreviewDpi") ?? 200;
-            var pages = previewRenderer.Render(storedPath, file.ContentType, dpi);
-            documents.InsertPages(docId, pages.Select(p => new DocumentPage
-            {
-                DocumentId = docId, PageNumber = p.PageNumber, WidthPx = p.Width, HeightPx = p.Height
-            }));
-        }
-        catch (Exception ex)
-        {
-            // previews are non-fatal: the pipeline can still extract; UI image just 404s
-            documents.LogEvent(docId, "PREVIEW", "CAPTURED", "CAPTURED",
-                $"Preview rendering failed: {ex.Message}", userId);
-        }
 
         // Honour the active processor's mode: REALTIME runs inline; otherwise (QUEUE or none) the
         // document is enqueued and processed off the request thread by the BackgroundService worker.

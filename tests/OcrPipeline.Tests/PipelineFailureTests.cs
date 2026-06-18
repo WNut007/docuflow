@@ -53,6 +53,7 @@ public sealed class PipelineFailureTests
         // no candidates -> resolver returns null -> OCR-first path -> EXTRACT (throwing engine) is reached
         public IReadOnlyList<TemplateResolver.Candidate> GetTemplatesForType(int t) => Array.Empty<TemplateResolver.Candidate>();
         public int CreateTemplate(int dt, string name, string model, string mode) => throw new NotSupportedException();
+        public void SetTemplateSample(int t, long d) => throw new NotSupportedException();
         public Dictionary<int, List<TransformerStep>> GetTransformerSteps(int t) => throw new NotSupportedException();
         public Dictionary<int, List<MappingTableColumn>> GetTableColumns(int t) => throw new NotSupportedException();
         public void SaveTableColumns(int fieldId, IEnumerable<MappingTableColumn> c) => throw new NotSupportedException();

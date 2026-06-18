@@ -109,6 +109,9 @@ public sealed class MappingTemplate
     public bool IsActive { get; set; } = true;
     /// <summary>OCR_FIRST (default, block-based mapping) or ZONAL (OCR only inside drawn zones).</summary>
     public string MappingMode { get; set; } = "OCR_FIRST";
+    /// <summary>The sample document this template's zones are drawn over (the designer backdrop).
+    /// NULL = no sample yet (designer shows an empty-state). FK -> Document(DocumentId).</summary>
+    public long? SampleDocumentId { get; set; }
     public List<MappingField> Fields { get; set; } = new();
 }
 
