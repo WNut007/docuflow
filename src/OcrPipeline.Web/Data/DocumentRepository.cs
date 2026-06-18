@@ -42,6 +42,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
                    DocumentTypeId, StatusCode, PageCount, CreatedAtUtc, StoredPath, Sha256,
                    ClassifyConfidence, UploadedByUserId
             FROM dbo.Document
+            WHERE StatusCode <> 'SAMPLE'   -- template-designer backdrops are not real documents
             ORDER BY CreatedAtUtc DESC;
             """;
         return db.Query<Document>(sql, new { Top = top }).ToList();
@@ -70,6 +71,7 @@ public sealed class DocumentRepository(SqlConnectionFactory factory) : IDocument
             SELECT TOP (@Top) d.DocumentId, d.OriginalFileName AS FileName, d.PageCount
             FROM dbo.Document d
             WHERE d.DocumentTypeId = @DocumentTypeId
+              AND d.StatusCode <> 'SAMPLE'   -- exclude template-designer backdrops
               AND EXISTS (SELECT 1 FROM dbo.DocumentPage p WHERE p.DocumentId = d.DocumentId)
             ORDER BY d.CreatedAtUtc DESC;
             """;
