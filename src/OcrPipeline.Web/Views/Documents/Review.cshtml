@@ -60,9 +60,25 @@
                 </span>
             </div>
             <div class="card-body p-2">
-                <div id="stage" class="visual-stage">
-                    <img id="pageImg" alt="page" />
-                    <div id="overlay" class="visual-overlay"></div>
+                <div class="vm-zoombar mb-2" role="toolbar" aria-label="Zoom document">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary" id="zoomOut" title="Zoom out" aria-label="Zoom out">
+                            <i class="bi bi-dash-lg"></i>
+                        </button>
+                        <span class="btn btn-outline-secondary disabled vm-zoom-pct" id="zoomPct" aria-live="polite">100%</span>
+                        <button type="button" class="btn btn-outline-secondary" id="zoomIn" title="Zoom in" aria-label="Zoom in">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="zoomFit" title="Fit to width">
+                        <i class="bi bi-arrows-angle-contract"></i> Fit width
+                    </button>
+                </div>
+                <div id="stageViewport" class="stage-viewport">
+                    <div id="stage" class="visual-stage review-stage">
+                        <img id="pageImg" alt="page" />
+                        <div id="overlay" class="visual-overlay"></div>
+                    </div>
                 </div>
             </div>
         </div>

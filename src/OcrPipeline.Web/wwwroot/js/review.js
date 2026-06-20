@@ -179,6 +179,25 @@
         setStatus(`Saved ${corrections.length + tableCorrections.length} change(s). Status: ${j.status}.`);
     }
 
+    // ---- document zoom: width-driven, NOT transform:scale ---------------------
+    // Zoom sets ONLY the stage width (% of the scrollable viewport). The inset:0 overlay and its
+    // percent-positioned boxes track the stage automatically, so we deliberately never call
+    // renderOverlay() or recompute geometry here — focus-to-zone stays aligned at every level, and
+    // native scroll/pan + scrollIntoView keep working. fit-to-width == 100% (baseline).
+    const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
+    let zoom = 1;
+    function applyZoom() {
+        $("stage").style.width = Math.round(zoom * 100) + "%";
+        $("zoomPct").textContent = Math.round(zoom * 100) + "%";
+        $("zoomOut").disabled = zoom <= ZOOM_MIN + 1e-9;
+        $("zoomIn").disabled = zoom >= ZOOM_MAX - 1e-9;
+    }
+    function setZoom(z) { zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)); applyZoom(); }
+    $("zoomIn").addEventListener("click", () => setZoom(zoom + ZOOM_STEP));
+    $("zoomOut").addEventListener("click", () => setZoom(zoom - ZOOM_STEP));
+    $("zoomFit").addEventListener("click", () => setZoom(1));
+    applyZoom();
+
     $("saveBtn").addEventListener("click", save);
     const list = $("valueList");
     list.addEventListener("focusin", onFocus);

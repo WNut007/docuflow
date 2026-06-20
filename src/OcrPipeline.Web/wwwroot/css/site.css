@@ -7,6 +7,20 @@
 .visual-stage { position: relative; display: inline-block; max-width: 100%; }
 .visual-stage img { max-width: 100%; height: auto; display: block; }
 .visual-overlay { position: absolute; inset: 0; }
+
+/* Review document zoom (PART 2) — width-driven, NOT transform:scale. The viewport scrolls;
+   zoom sets ONLY #stage's width (% of the viewport). The inset:0 overlay + its percent-positioned
+   boxes track the stage automatically, so zoom never re-renders the overlay and focus-to-zone stays
+   aligned at every level. Scoped to .review-stage so the Zones/Visual designers are untouched.
+   fit-to-width == 100% (baseline); .review-stage img:width:100% keeps the image flush to the stage
+   so the overlay can't drift wider than the picture. */
+.stage-viewport { overflow: auto; max-height: clamp(24rem, 72vh, 820px);
+                  border: 1px solid var(--bs-border-color); border-radius: .25rem; background: var(--bs-tertiary-bg); }
+.review-stage { display: block; width: 100%; max-width: none; }
+.review-stage img { width: 100%; }
+.vm-zoombar { display: flex; align-items: center; gap: .4rem; }
+.vm-zoom-pct { display: inline-block; min-width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums;
+               pointer-events: none; }
 .vm-box { position: absolute; border: 2px solid rgba(13,110,253,.55); background: rgba(13,110,253,.08);
           border-radius: 3px; cursor: pointer; }
 .vm-box:hover { background: rgba(13,110,253,.22); border-color: rgba(13,110,253,.9); }
