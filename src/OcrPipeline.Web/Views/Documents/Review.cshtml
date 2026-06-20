@@ -10,14 +10,16 @@
     };
 }
 
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="d-flex justify-content-between align-items-start mb-3">
     <div>
-        <h1 class="h4 mb-0"><i class="bi bi-clipboard-check"></i> Review: @Model.Document.OriginalFileName</h1>
-        <div class="text-body-secondary small">
-            Status <partial name="_StatusBadge" model="@Model.Document.StatusCode" />
+        <h1 class="h4 mb-1"><i class="bi bi-clipboard-check text-body-secondary"></i> @Model.Document.OriginalFileName</h1>
+        <div class="d-flex align-items-center gap-2">
+            <partial name="_StatusBadge" model="@Model.Document.StatusCode" />
             @if (Model.HasResult && Model.OverallConfidence is { } oc)
             {
-                <span class="ms-2">overall confidence @oc.ToString("P0")</span>
+                <span class="badge rounded-pill text-bg-light border" title="overall confidence">
+                    <i class="bi bi-speedometer2"></i> @oc.ToString("P0") confidence
+                </span>
             }
         </div>
     </div>
@@ -73,10 +75,10 @@
             <div class="card-body" id="valueList">
                 @foreach (var v in Model.Values)
                 {
-                    <div class="vm-review-row border-start border-4 border-@v.BandClass ps-2 mb-2">
-                        <label class="form-label small mb-1 d-flex justify-content-between">
+                    <div class="vm-review-row border-start border-4 border-@v.BandClass mb-2">
+                        <label class="form-label small mb-1 d-flex justify-content-between align-items-center">
                             <span class="fw-semibold">@v.TargetProperty</span>
-                            <span class="badge text-bg-@v.BandClass">@(v.Confidence is { } c ? c.ToString("P0") : "—")</span>
+                            <span class="badge rounded-pill text-bg-@v.BandClass">@(v.Confidence is { } c ? c.ToString("P0") : "—")</span>
                         </label>
                         @if (v.Table is { } tbl)
                         {
@@ -102,7 +104,10 @@
                                                 }
                                                 @foreach (var col in tbl.Columns)
                                                 {
-                                                    <th class="small">@col.SubProperty@(col.IsAnchor ? " ⚓" : "")</th>
+                                                    <th class="small">
+                                                        @col.SubProperty@if (col.IsAnchor)
+                                                        {<span class="li-anchor" title="anchor column — identifies the row">⚓</span>}
+                                                    </th>
                                                 }
                                                 <th class="li-delcol"></th>
                                             </tr>
@@ -128,7 +133,7 @@
                                                         </td>
                                                     }
                                                     <td class="li-delcol">
-                                                        <button type="button" class="btn btn-sm btn-outline-danger py-0 li-del" title="delete row"><i class="bi bi-x"></i></button>
+                                                        <button type="button" class="li-del" title="delete row" aria-label="delete row">×</button>
                                                     </td>
                                                 </tr>
                                             }
@@ -156,7 +161,7 @@
             </div>
             <div class="card-footer d-flex justify-content-between align-items-center">
                 <span id="status" class="small text-body-secondary"></span>
-                <button type="button" class="btn btn-sm btn-primary" id="saveBtn">
+                <button type="button" class="btn btn-primary" id="saveBtn">
                     <i class="bi bi-check2-circle"></i> Save corrections
                 </button>
             </div>
