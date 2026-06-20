@@ -108,3 +108,16 @@
 .zone-footer-save { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }  /* this group absorbs the slack */
 .zone-footer-save > .btn { flex-shrink: 0; }             /* but Save stays full size */
 .zone-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Zone designer card polish (item 4 ②) — chrome only; JS hooks (radio/⚓/×/Draw/+column/+region) untouched */
+.zone-row-label { flex: 0 0 auto; width: 2.6rem; }                 /* "Page"/"OCR" labels align so the controls line up */
+.zone-table-card { border-left: 3px solid rgba(25,135,84,.45); }   /* green accent echoes the line_item table zone */
+.zone-table-glyph { color: var(--bs-success); }
+.zone-region { background: var(--bs-body-bg); }                     /* regions pop against the tinted table card */
+.zone-col-row { display: grid; grid-template-columns: minmax(0,1fr) 6.5rem auto auto; gap: .4rem; align-items: center; }
+.zone-col-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.zone-anchor { margin-left: .1rem; color: var(--bs-secondary-color); cursor: pointer; }
+/* lighter secondary buttons: + column / copy from FIRST / + Add page region */
+.zone-secondary-btn { --bs-btn-color: var(--bs-secondary-color); --bs-btn-border-color: var(--bs-border-color);
+                      --bs-btn-hover-color: var(--bs-body-color); --bs-btn-hover-bg: var(--bs-tertiary-bg);
+                      --bs-btn-hover-border-color: var(--bs-secondary-color); }
