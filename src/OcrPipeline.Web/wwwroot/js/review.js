@@ -57,11 +57,29 @@
 
     function showPage(pg) {
         pg = Math.max(1, Math.min(pg, state.pageCount || 1));
-        if (pg === state.page) { renderOverlay(); return; }
+        if (pg === state.page) { renderOverlay(); updatePageNav(); return; }
         state.page = pg;
         $("pageImg").src = `/api/documents/${state.documentId}/pages/${pg}/image`;
         const lbl = $("pageLabel"); if (lbl) lbl.textContent = `Page ${pg} / ${state.pageCount}`;
         renderOverlay();   // percent boxes; onImageReady re-renders once the new image has size
+        updatePageNav();   // zoom is untouched here, so paging keeps the current zoom level
+    }
+
+    // Page nav (multi-page only; absent on single-page docs). Manual prev/next + the editable page
+    // input and the focus-driven auto-switch all funnel through showPage, so the input + disabled
+    // states always reflect the visible page.
+    function updatePageNav() {
+        const prev = $("prevPage"), next = $("nextPage"), inp = $("pageInput");
+        if (prev) prev.disabled = state.page <= 1;
+        if (next) next.disabled = state.page >= (state.pageCount || 1);
+        if (inp) inp.value = state.page;   // also reflects clamping (e.g. typed "9" -> last page)
+    }
+    function gotoPageInput() {
+        const inp = $("pageInput");
+        if (!inp) return;
+        const n = parseInt(inp.value, 10);
+        showPage(Number.isFinite(n) ? n : 1);   // empty/NaN -> page 1; showPage clamps to [1, pageCount]
+        inp.value = state.page;                  // snap the field to the clamped result
     }
 
     function renderOverlay() {
@@ -178,6 +196,34 @@
         dirtyTables.clear();
         setStatus(`Saved ${corrections.length + tableCorrections.length} change(s). Status: ${j.status}.`);
     }
+
+    // ---- document zoom: width-driven, NOT transform:scale ---------------------
+    // Zoom sets ONLY the stage width (% of the scrollable viewport). The inset:0 overlay and its
+    // percent-positioned boxes track the stage automatically, so we deliberately never call
+    // renderOverlay() or recompute geometry here — focus-to-zone stays aligned at every level, and
+    // native scroll/pan + scrollIntoView keep working. fit-to-width == 100% (baseline).
+    const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
+    let zoom = 1;
+    function applyZoom() {
+        $("stage").style.width = Math.round(zoom * 100) + "%";
+        $("zoomPct").textContent = Math.round(zoom * 100) + "%";
+        $("zoomOut").disabled = zoom <= ZOOM_MIN + 1e-9;
+        $("zoomIn").disabled = zoom >= ZOOM_MAX - 1e-9;
+    }
+    function setZoom(z) { zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)); applyZoom(); }
+    $("zoomIn").addEventListener("click", () => setZoom(zoom + ZOOM_STEP));
+    $("zoomOut").addEventListener("click", () => setZoom(zoom - ZOOM_STEP));
+    $("zoomFit").addEventListener("click", () => setZoom(1));
+    applyZoom();
+
+    const prevBtn = $("prevPage"), nextBtn = $("nextPage"), pageInp = $("pageInput");
+    if (prevBtn) prevBtn.addEventListener("click", () => showPage(state.page - 1));
+    if (nextBtn) nextBtn.addEventListener("click", () => showPage(state.page + 1));
+    if (pageInp) {
+        pageInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); gotoPageInput(); pageInp.blur(); } });
+        pageInp.addEventListener("blur", gotoPageInput);
+    }
+    updatePageNav();
 
     $("saveBtn").addEventListener("click", save);
     const list = $("valueList");

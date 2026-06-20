@@ -7,6 +7,25 @@
 .visual-stage { position: relative; display: inline-block; max-width: 100%; }
 .visual-stage img { max-width: 100%; height: auto; display: block; }
 .visual-overlay { position: absolute; inset: 0; }
+
+/* Review document zoom (PART 2) — width-driven, NOT transform:scale. The viewport scrolls;
+   zoom sets ONLY #stage's width (% of the viewport). The inset:0 overlay + its percent-positioned
+   boxes track the stage automatically, so zoom never re-renders the overlay and focus-to-zone stays
+   aligned at every level. Scoped to .review-stage so the Zones/Visual designers are untouched.
+   fit-to-width == 100% (baseline); .review-stage img:width:100% keeps the image flush to the stage
+   so the overlay can't drift wider than the picture. */
+.stage-viewport { overflow: auto; max-height: clamp(24rem, 72vh, 820px);
+                  border: 1px solid var(--bs-border-color); border-radius: .25rem; background: var(--bs-tertiary-bg); }
+.review-stage { display: block; width: 100%; max-width: none; }
+.review-stage img { width: 100%; }
+.vm-zoombar { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.vm-zoom-pct { display: inline-block; min-width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums;
+               pointer-events: none; }
+.vm-pagenav { white-space: nowrap; }
+.vm-page-input { width: 3rem; text-align: center; font-variant-numeric: tabular-nums;
+                 -moz-appearance: textfield; appearance: textfield; }
+.vm-page-input::-webkit-outer-spin-button, .vm-page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vm-divider { width: 1px; align-self: stretch; min-height: 1.5rem; background: var(--bs-border-color); margin: 0 .15rem; }
 .vm-box { position: absolute; border: 2px solid rgba(13,110,253,.55); background: rgba(13,110,253,.08);
           border-radius: 3px; cursor: pointer; }
 .vm-box:hover { background: rgba(13,110,253,.22); border-color: rgba(13,110,253,.9); }
@@ -38,7 +57,8 @@
 
 /* Multi-page line-item review: ONE bounded, scrollable table with a sticky header */
 .li-scroll { max-height: clamp(22rem, 65vh, 600px); overflow-y: auto; border: 1px solid var(--bs-border-color); border-radius: .25rem; }
-.li-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bs-body-bg);
+.li-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bs-secondary-bg);
+                     font-weight: 600; color: var(--bs-secondary-color);
                      box-shadow: inset 0 -1px 0 var(--bs-border-color); }
 .li-pgcol { width: 2.2rem; text-align: center; }
 .li-delcol { width: 1.8rem; }
@@ -46,6 +66,16 @@
 .li-row.li-junk input.li-cell { border-color: rgba(220,53,69,.6); }
 .li-pagejump { display: flex; flex-wrap: wrap; gap: .25rem; }
 .li-jump { cursor: pointer; font-weight: 500; }
+
+/* Review panel polish (PART 1) — chrome only; JS hooks (.li-junk, .vm-zone-focus, bands) untouched */
+.vm-review-row { padding: .5rem .6rem; background: var(--bs-tertiary-bg);
+                 border-top-right-radius: .35rem; border-bottom-right-radius: .35rem; }
+.review-input, .li-cell { font-family: var(--bs-font-monospace); }
+.li-table td, .li-table th { padding: .3rem .4rem; }
+.li-anchor { margin-left: .15rem; color: var(--bs-secondary-color); font-size: .85em; cursor: help; }
+.li-del { border: 0; background: transparent; line-height: 1; padding: 0 .3rem;
+          color: var(--bs-secondary-color); font-size: 1.15rem; cursor: pointer; }
+.li-del:hover, .li-del:focus-visible { color: var(--bs-danger); }
 
 /* Zone designer: a line_item table card groups its page-regions (name lives once on the table) */
 .zone-table-card { background: var(--bs-tertiary-bg); }
