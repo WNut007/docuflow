@@ -56,6 +56,7 @@ public sealed class MappingController(
     private int? GetUserId()
         => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var uid) ? uid : null;
 
+    // TODO: dead code — Edit (mapping editor) unlinked from UI as of review-polish; candidate for removal (ii).
     [HttpGet]
     public IActionResult Edit(int id)
     {
@@ -126,6 +127,7 @@ public sealed class MappingController(
 
     // ---- Point-and-click mapping (Prompt 4) -------------------------------
 
+    // TODO: dead code — Visual (point-and-click mapping) unlinked from UI as of review-polish; candidate for removal (ii).
     [HttpGet]
     public IActionResult Visual(int templateId, long? documentId)
     {
