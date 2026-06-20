@@ -64,16 +64,21 @@
     }
 
     // ---- document / image -----------------------------------------------------
+    let navCtl = null;                          // DocViewport page-nav controller (wired at init)
+    function syncNav() { if (navCtl) navCtl.sync(); }
     function loadDoc() {
-        if (!state.documentId) { $("stage").classList.add("d-none"); $("noDoc").classList.remove("d-none"); return; }
-        $("stage").classList.remove("d-none"); $("noDoc").classList.add("d-none");
+        if (!state.documentId) { $("stageViewport").classList.add("d-none"); $("noDoc").classList.remove("d-none"); return; }
+        $("stageViewport").classList.remove("d-none"); $("noDoc").classList.add("d-none");
         $("pageImg").src = `/api/documents/${state.documentId}/pages/${state.page}/image`;
-        renderOverlay(); renderFields(); updatePager();
+        renderOverlay(); renderFields(); syncNav();
     }
-    function updatePager() {
-        $("pageLabel").textContent = `${state.page} / ${state.pageCount || 1}`;
-        $("prevPage").disabled = state.page <= 1;
-        $("nextPage").disabled = state.page >= state.pageCount;
+    // Manual prev/next + the editable page input funnel through goToPage; zoom is untouched here, so
+    // paging keeps the current zoom level (the new page image fills the already-zoomed stage).
+    function goToPage(pg) {
+        pg = Math.max(1, Math.min(pg, state.pageCount || 1));
+        if (pg === state.page) { syncNav(); return; }
+        state.page = pg;
+        loadDoc();
     }
 
     // ---- columns --------------------------------------------------------------
@@ -510,8 +515,14 @@
     $("modeSelect").value = state.mappingMode;
     $("modeSelect").addEventListener("change", e => { state.mappingMode = e.target.value; });
     $("templateSelect").addEventListener("change", e => { location.href = `/Mapping/Zones?templateId=${e.target.value}`; });
-    $("prevPage").addEventListener("click", () => { if (state.page > 1) { state.page--; loadDoc(); } });
-    $("nextPage").addEventListener("click", () => { if (state.page < state.pageCount) { state.page++; loadDoc(); } });
+    // Width-driven zoom + page nav shared with the Review screen (see doc-viewport.js). Controls are
+    // null when absent (single-page docs omit the nav; a sample-less template omits the toolbar).
+    DocViewport.attachZoom({ stage: $("stage"), zoomOut: $("zoomOut"), zoomPct: $("zoomPct"),
+                             zoomIn: $("zoomIn"), zoomFit: $("zoomFit") });
+    navCtl = DocViewport.attachNav({
+        prevPage: $("prevPage"), nextPage: $("nextPage"), pageInput: $("pageInput"),
+        getPage: () => state.page, getPageCount: () => state.pageCount, goToPage
+    });
     $("filter").addEventListener("input", renderFields);
     $("addField").addEventListener("click", () => {
         state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, minConfidence: 0.6, sourceType: "KEY_VALUE", zonePage: null, zoneX: null, zoneY: null, zoneW: null, zoneH: null, ocrHint: "TEXT", psm: null, role: "", columns: [], _changed: true });

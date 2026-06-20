@@ -82,7 +82,9 @@
 .li-jump.li-jump-active { background: var(--bs-primary) !important; color: #fff !important; }
 
 /* Zone designer (zonal / template-based OCR) */
-.zone-stage { cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.zone-stage { cursor: crosshair; user-select: none; -webkit-user-select: none;
+              display: block; width: 100%; max-width: none; }   /* width-driven zoom (item 4 ③), like .review-stage */
+.zone-stage img { width: 100%; }
 .zone-box { position: absolute; border: 2px solid rgba(13,110,253,.8); background: rgba(13,110,253,.10);
             cursor: move; box-sizing: border-box; }
 .zone-box.zone-armed { border-color: rgba(255,193,7,.95); background: rgba(255,193,7,.14); }
