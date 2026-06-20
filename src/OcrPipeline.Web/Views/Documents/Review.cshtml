@@ -60,8 +60,26 @@
                 </span>
             </div>
             <div class="card-body p-2">
-                <div class="vm-zoombar mb-2" role="toolbar" aria-label="Zoom document">
-                    <div class="btn-group btn-group-sm" role="group">
+                <div class="vm-zoombar mb-2" role="toolbar" aria-label="Document toolbar">
+                    @if (Model.PageCount > 1)
+                    {
+                        @* Page nav (multi-page only): prev/next + editable page number, all driven through showPage(). *@
+                        <div class="vm-pagenav d-flex align-items-center gap-1" aria-label="Page navigation">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="prevPage" title="Previous page" aria-label="Previous page">
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <span class="d-inline-flex align-items-center gap-1 small">
+                                <input type="number" class="form-control form-control-sm vm-page-input" id="pageInput"
+                                       value="1" min="1" max="@Model.PageCount" aria-label="Page number" />
+                                <span class="text-body-secondary">/ @Model.PageCount</span>
+                            </span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="nextPage" title="Next page" aria-label="Next page">
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+                        <span class="vm-divider" aria-hidden="true"></span>
+                    }
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
                         <button type="button" class="btn btn-outline-secondary" id="zoomOut" title="Zoom out" aria-label="Zoom out">
                             <i class="bi bi-dash-lg"></i>
                         </button>
