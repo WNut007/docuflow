@@ -100,3 +100,11 @@
 .zone-sep { position: absolute; top: 0; bottom: 0; width: 0; margin-left: -4px; padding: 0 4px;
             border-left: 2px solid rgba(25,135,84,.9); cursor: ew-resize; }
 .zone-armed .zone-sep { border-left-color: rgba(255,140,0,.95); }
+
+/* Zone designer footer (item 4 ①): keep [New field|New table] and Save fixed-width; let the long
+   status string truncate with an ellipsis between them instead of overlapping the buttons. The
+   footer wraps to a second line only when even the truncated status can't fit (narrow col-lg-5). */
+.zone-footer-actions { flex-shrink: 0; }                 /* New field / New table never shrink */
+.zone-footer-save { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }  /* this group absorbs the slack */
+.zone-footer-save > .btn { flex-shrink: 0; }             /* but Save stays full size */
+.zone-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
