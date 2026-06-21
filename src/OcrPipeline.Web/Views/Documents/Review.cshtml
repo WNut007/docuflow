@@ -46,7 +46,7 @@
 
 @Html.AntiForgeryToken()
 
-<div class="row g-3">
+<div class="row g-3 doc-pane-row">
     @* LEFT: page image with mapped values overlaid on their source boxes, coloured by confidence *@
     <div class="col-lg-7">
         <div class="card h-100">
@@ -104,7 +104,7 @@
 
     @* RIGHT: editable mapped values, tinted by confidence band *@
     <div class="col-lg-5">
-        <div class="card h-100">
+        <div class="card doc-scroll-card">
             <div class="card-header">Mapped values <span class="text-body-secondary small">— correct any value, then Save</span></div>
             <div class="card-body" id="valueList">
                 @foreach (var v in Model.Values)
