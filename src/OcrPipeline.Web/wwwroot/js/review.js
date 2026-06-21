@@ -180,7 +180,12 @@
         const j = await res.json();
         document.querySelectorAll(".review-input, .li-cell").forEach(inp => { inp.dataset.original = inp.value; });
         dirtyTables.clear();
-        setStatus(`Saved ${corrections.length + tableCorrections.length} change(s). Status: ${j.status}.`);
+        // Save also finalizes (NEEDS_REVIEW -> VALIDATED) even with no edits, so a 0-change save isn't a
+        // failure — word it as such while still surfacing the resulting status.
+        const total = corrections.length + tableCorrections.length;
+        setStatus(total === 0
+            ? `No changes to save. Status: ${j.status}.`
+            : `Saved ${total} change(s). Status: ${j.status}.`);
     }
 
     // Width-driven zoom + page nav are shared with the zone designer (see doc-viewport.js).
