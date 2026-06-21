@@ -142,3 +142,15 @@
 .zone-secondary-btn { --bs-btn-color: var(--bs-secondary-color); --bs-btn-border-color: var(--bs-border-color);
                       --bs-btn-hover-color: var(--bs-body-color); --bs-btn-hover-bg: var(--bs-tertiary-bg);
                       --bs-btn-hover-border-color: var(--bs-secondary-color); }
+
+/* Upload page: drag-and-drop file zone. The real <input type=file> is hidden; the zone is the click
+   target and the drop target (JS assigns dropped files back to the input, which stays required). */
+.upload-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.upload-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center;
+                   gap: .25rem; text-align: center; padding: 1.75rem 1rem; cursor: pointer;
+                   border: 2px dashed var(--bs-border-color); border-radius: var(--ocr-radius);
+                   background: var(--bs-tertiary-bg); transition: border-color .15s ease, background-color .15s ease; }
+.upload-dropzone:hover, .upload-dropzone:focus-visible { border-color: var(--bs-primary); outline: none; }
+.upload-dropzone.upload-dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+.upload-dz-icon { font-size: 2rem; color: var(--bs-secondary-color); }
+.upload-dz-file { display: flex; align-items: center; gap: .5rem; width: 100%; max-width: 100%; }
