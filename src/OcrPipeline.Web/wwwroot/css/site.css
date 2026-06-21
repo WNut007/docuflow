@@ -111,23 +111,24 @@
 .zone-footer-save > .btn { flex-shrink: 0; }             /* but Save stays full size */
 .zone-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Zone designer pinned-footer layout (item 4 follow-up): at >=lg the two panes sit side by side and
-   scroll independently. Bound the row to the viewport so the RIGHT pane is a flex column — pinned
-   header (template/mode/filter), a scrolling field list, and a pinned footer so Save is always
-   reachable without scrolling the whole list. The LEFT pane is untouched (its .stage-viewport keeps
-   its own zoom scroll). Below lg the cols stack and it falls back to normal page scroll. */
+/* Pinned-footer pane layout — shared by the Zone designer and the Review screen. At >=lg the two panes
+   sit side by side and scroll independently: bound the row to the viewport and make the RIGHT card
+   (.doc-scroll-card) a flex column — pinned header, a scrolling body, and a pinned footer so the
+   primary action (Save) is always reachable without scrolling the whole list. The LEFT pane is
+   untouched (its .stage-viewport keeps its own zoom scroll). Below lg the cols stack -> normal scroll. */
 @media (min-width: 992px) {
-    .zone-pane-row { height: calc(100vh - 10.5rem); min-height: 30rem; }  /* left pane stretches to match */
-    /* Bound the RIGHT card directly with a viewport height (definite, content-independent) rather than
-       the row -> col -> %-height chain: flex items default to min-height:auto, so a long field list
-       would otherwise force the card taller than the row and nothing would overflow. The card has no
+    .doc-pane-row { height: calc(100vh - 10.5rem); min-height: 30rem; }  /* left pane stretches to match */
+    /* Bound the scroll card directly with a viewport height (definite, content-independent) rather than
+       the row -> col -> %-height chain: flex items default to min-height:auto, so a long list would
+       otherwise force the card taller than the row and nothing would overflow. The card carries no
        .h-100 (its !important would fight this); the col it sits in is short enough to stretch normally. */
-    .zone-fields-card { height: calc(100vh - 10.5rem); overflow: hidden; }
-    .zone-fields-card > .card-header { flex: 0 0 auto; }                 /* pinned top */
-    .zone-fields-card > .card-body { overflow-y: auto; min-height: 0; }  /* the only scroller */
-    .zone-fields-card > .card-footer { flex: 0 0 auto; }                 /* pinned bottom */
+    .doc-scroll-card { height: calc(100vh - 10.5rem); overflow: hidden; }
+    .doc-scroll-card > .card-header { flex: 0 0 auto; }                 /* pinned top */
+    .doc-scroll-card > .card-body { overflow-y: auto; min-height: 0; }  /* the only scroller */
+    .doc-scroll-card > .card-footer { flex: 0 0 auto; }                 /* pinned bottom */
 }
-.zone-footer { background: var(--bs-card-bg); box-shadow: 0 -.4rem .5rem -.35rem rgba(0,0,0,.12); }
+/* solid bg + subtle top shadow separates the pinned footer from the scrolling content above it */
+.doc-scroll-card > .card-footer { background: var(--bs-card-bg); box-shadow: 0 -.4rem .5rem -.35rem rgba(0,0,0,.12); }
 
 /* Zone designer card polish (item 4 ②) — chrome only; JS hooks (radio/⚓/×/Draw/+column/+region) untouched */
 .zone-row-label { flex: 0 0 auto; width: 2.6rem; }                 /* "Page"/"OCR" labels align so the controls line up */
