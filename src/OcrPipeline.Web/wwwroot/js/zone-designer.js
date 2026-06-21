@@ -64,16 +64,21 @@
     }
 
     // ---- document / image -----------------------------------------------------
+    let navCtl = null;                          // DocViewport page-nav controller (wired at init)
+    function syncNav() { if (navCtl) navCtl.sync(); }
     function loadDoc() {
-        if (!state.documentId) { $("stage").classList.add("d-none"); $("noDoc").classList.remove("d-none"); return; }
-        $("stage").classList.remove("d-none"); $("noDoc").classList.add("d-none");
+        if (!state.documentId) { $("stageViewport").classList.add("d-none"); $("noDoc").classList.remove("d-none"); return; }
+        $("stageViewport").classList.remove("d-none"); $("noDoc").classList.add("d-none");
         $("pageImg").src = `/api/documents/${state.documentId}/pages/${state.page}/image`;
-        renderOverlay(); renderFields(); updatePager();
+        renderOverlay(); renderFields(); syncNav();
     }
-    function updatePager() {
-        $("pageLabel").textContent = `${state.page} / ${state.pageCount || 1}`;
-        $("prevPage").disabled = state.page <= 1;
-        $("nextPage").disabled = state.page >= state.pageCount;
+    // Manual prev/next + the editable page input funnel through goToPage; zoom is untouched here, so
+    // paging keeps the current zoom level (the new page image fills the already-zoomed stage).
+    function goToPage(pg) {
+        pg = Math.max(1, Math.min(pg, state.pageCount || 1));
+        if (pg === state.page) { syncNav(); return; }
+        state.page = pg;
+        loadDoc();
     }
 
     // ---- columns --------------------------------------------------------------
@@ -295,7 +300,7 @@
 
         // page-role for a scalar header/total zone (FIRST=read on p1, LAST=read on last page).
         const roleRow = el("div", "d-flex gap-2 align-items-center mt-1");
-        roleRow.appendChild(el("span", "small text-body-secondary", "Page"));
+        roleRow.appendChild(el("span", "small text-body-secondary zone-row-label", "Page"));
         const roleSel = el("select", "form-select form-select-sm"); roleSel.style.maxWidth = "160px";
         [["", "Single page"], ["FIRST", "First (header)"], ["CONTINUATION", "Continuation"], ["LAST", "Last (totals)"]]
             .forEach(([v, t]) => { const op = el("option", null, t); op.value = v; op.selected = (f.role || "") === v; roleSel.appendChild(op); });
@@ -304,7 +309,7 @@
         body.appendChild(roleRow);
 
         const tools = el("div", "d-flex gap-2 align-items-center mt-1");
-        tools.appendChild(el("span", "small text-body-secondary", "OCR"));
+        tools.appendChild(el("span", "small text-body-secondary zone-row-label", "OCR"));
         const hint = el("select", "form-select form-select-sm"); hint.style.maxWidth = "130px";
         [["TEXT", "Text"], ["NUMERIC", "Numeric"], ["DATE", "Date"], ["INT", "Integer"]].forEach(([v, t]) => {
             const op = el("option", null, t); op.value = v; op.selected = (f.ocrHint || "TEXT") === v; hint.appendChild(op);
@@ -332,7 +337,7 @@
 
         // ONE name input for the whole table — editing renames every region in the group together.
         const head = el("div", "d-flex gap-2 align-items-center");
-        head.appendChild(el("span", "fs-5", "▦"));
+        head.appendChild(el("span", "fs-5 zone-table-glyph", "▦"));
         const name = el("input", "form-control form-control-sm fw-semibold"); name.value = g.name; name.placeholder = "table name (e.g. line_item)";
         name.addEventListener("input", () => {
             g.name = name.value;
@@ -347,7 +352,7 @@
         const ordered = g.items.slice().sort((a, b) => roleRank(a.f.role) - roleRank(b.f.role) || a.idx - b.idx);
         ordered.forEach(({ f, idx }) => body.appendChild(renderRegion(g, f, idx, roleCounts)));
 
-        const add = el("button", "btn btn-sm btn-outline-secondary mt-2", "+ Add page region"); add.type = "button";
+        const add = el("button", "btn btn-sm btn-outline-secondary zone-secondary-btn mt-2", "+ Add page region"); add.type = "button";
         add.addEventListener("click", () => addPageRegion(g));
         body.appendChild(add);
 
@@ -357,10 +362,10 @@
 
     function renderRegion(g, f, idx, roleCounts) {
         const dup = roleCounts[normRole(f.role)] > 1;
-        const region = el("div", "border rounded p-2 mt-2" + (idx === state.armed ? " border-primary" : "") + (dup ? " border-danger" : ""));
+        const region = el("div", "zone-region border rounded p-2 mt-2" + (idx === state.armed ? " border-primary" : "") + (dup ? " border-danger" : ""));
 
         const top = el("div", "d-flex gap-2 align-items-center");
-        top.appendChild(el("span", "small text-body-secondary", "Page"));
+        top.appendChild(el("span", "small text-body-secondary zone-row-label", "Page"));
         // role select: disable roles already taken by SIBLING regions (can't pick two CONTINUATIONs)
         const used = new Set(g.items.filter(o => o.f !== f).map(o => normRole(o.f.role)).filter(Boolean));
         const roleSel = el("select", "form-select form-select-sm"); roleSel.style.maxWidth = "150px";
@@ -426,26 +431,26 @@
         const wrap = el("div", "mt-2 border-top pt-2");
         wrap.appendChild(el("div", "small text-body-secondary mb-1", "Columns — ⚓ marks the anchor (one value per row); drag separators on the table to set widths"));
         f.columns.forEach((c, ci) => {
-            const row = el("div", "d-flex gap-1 align-items-center mb-1");
-            const cn = el("input", "form-control form-control-sm"); cn.value = c.targetSubProperty; cn.placeholder = "sub-field"; cn.style.maxWidth = "130px";
+            const row = el("div", "zone-col-row mb-1");
+            const cn = el("input", "form-control form-control-sm"); cn.value = c.targetSubProperty; cn.placeholder = "sub-field";
             cn.addEventListener("input", () => { c.targetSubProperty = cn.value; f._changed = true; });
-            const ct = el("select", "form-select form-select-sm"); ct.style.maxWidth = "100px";
+            const ct = el("select", "form-select form-select-sm");
             ["STRING", "DECIMAL", "INT", "DATE"].forEach(o => { const op = el("option", null, o); op.selected = c.dataType === o; ct.appendChild(op); });
             ct.addEventListener("change", () => { c.dataType = ct.value; f._changed = true; });
             const anchor = el("div", "form-check form-check-inline m-0");
             const ar = el("input", "form-check-input"); ar.type = "radio"; ar.name = `anchor-${fieldIdx}`; ar.checked = c.isAnchor; ar.title = "anchor column (one value per row)";
             ar.addEventListener("change", () => { f.columns.forEach(x => x.isAnchor = false); c.isAnchor = true; f._changed = true; });
-            anchor.append(ar, el("label", "form-check-label small", "⚓"));
+            anchor.append(ar, el("label", "form-check-label small zone-anchor", "⚓"));
             const rm = el("button", "btn btn-sm btn-outline-danger py-0"); rm.type = "button"; rm.appendChild(el("i", "bi bi-x"));
             rm.addEventListener("click", () => removeColumn(f, ci));
             row.append(cn, ct, anchor, rm);
             wrap.appendChild(row);
         });
-        const add = el("button", "btn btn-sm btn-outline-secondary py-0", "+ column"); add.type = "button";
+        const add = el("button", "btn btn-sm btn-outline-secondary zone-secondary-btn py-0", "+ column"); add.type = "button";
         add.addEventListener("click", () => addColumn(f));
-        const copy = el("button", "btn btn-sm btn-outline-secondary py-0 ms-1", "copy columns from FIRST"); copy.type = "button";
+        const copy = el("button", "btn btn-sm btn-outline-secondary zone-secondary-btn py-0", "copy columns from FIRST"); copy.type = "button";
         copy.addEventListener("click", () => copyColumnsFromFirst(f));
-        wrap.append(add, copy);
+        const actions = el("div", "zone-col-actions mt-1"); actions.append(add, copy); wrap.appendChild(actions);
         return wrap;
     }
 
@@ -510,8 +515,14 @@
     $("modeSelect").value = state.mappingMode;
     $("modeSelect").addEventListener("change", e => { state.mappingMode = e.target.value; });
     $("templateSelect").addEventListener("change", e => { location.href = `/Mapping/Zones?templateId=${e.target.value}`; });
-    $("prevPage").addEventListener("click", () => { if (state.page > 1) { state.page--; loadDoc(); } });
-    $("nextPage").addEventListener("click", () => { if (state.page < state.pageCount) { state.page++; loadDoc(); } });
+    // Width-driven zoom + page nav shared with the Review screen (see doc-viewport.js). Controls are
+    // null when absent (single-page docs omit the nav; a sample-less template omits the toolbar).
+    DocViewport.attachZoom({ stage: $("stage"), zoomOut: $("zoomOut"), zoomPct: $("zoomPct"),
+                             zoomIn: $("zoomIn"), zoomFit: $("zoomFit") });
+    navCtl = DocViewport.attachNav({
+        prevPage: $("prevPage"), nextPage: $("nextPage"), pageInput: $("pageInput"),
+        getPage: () => state.page, getPageCount: () => state.pageCount, goToPage
+    });
     $("filter").addEventListener("input", renderFields);
     $("addField").addEventListener("click", () => {
         state.fields.push({ fieldId: 0, targetProperty: "", dataType: "STRING", isRequired: false, minConfidence: 0.6, sourceType: "KEY_VALUE", zonePage: null, zoneX: null, zoneY: null, zoneW: null, zoneH: null, ocrHint: "TEXT", psm: null, role: "", columns: [], _changed: true });

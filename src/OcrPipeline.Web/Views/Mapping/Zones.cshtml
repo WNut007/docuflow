@@ -24,23 +24,55 @@
 
 @Html.AntiForgeryToken()
 
-<div class="row g-3">
+<div class="row g-3 zone-pane-row">
     @* ---------------- LEFT: page image + draggable zones ---------------- *@
     <div class="col-lg-7">
         <div class="card h-100">
             <div class="card-header d-flex align-items-center gap-2">
                 <i class="bi bi-file-earmark-image"></i>
                 <span class="small text-body-secondary">Sample document</span>
-                <div class="ms-auto btn-group btn-group-sm" id="pager" role="group">
-                    <button type="button" class="btn btn-outline-secondary" id="prevPage"><i class="bi bi-chevron-left"></i></button>
-                    <span class="btn btn-outline-secondary disabled" id="pageLabel">1 / @Model.PageCount</span>
-                    <button type="button" class="btn btn-outline-secondary" id="nextPage"><i class="bi bi-chevron-right"></i></button>
-                </div>
             </div>
             <div class="card-body p-2">
-                <div id="stage" class="visual-stage zone-stage">
-                    <img id="pageImg" alt="page" />
-                    <div id="overlay" class="visual-overlay"></div>
+                @if (Model.PageCount > 0)
+                {
+                    <div class="vm-zoombar mb-2" role="toolbar" aria-label="Document toolbar">
+                        @if (Model.PageCount > 1)
+                        {
+                            @* Page nav (multi-page only): prev/next + editable page number — shared with Review (doc-viewport.js). *@
+                            <div class="vm-pagenav d-flex align-items-center gap-1" aria-label="Page navigation">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="prevPage" title="Previous page" aria-label="Previous page">
+                                    <i class="bi bi-chevron-left"></i>
+                                </button>
+                                <span class="d-inline-flex align-items-center gap-1 small">
+                                    <input type="number" class="form-control form-control-sm vm-page-input" id="pageInput"
+                                           value="1" min="1" max="@Model.PageCount" aria-label="Page number" />
+                                    <span class="text-body-secondary">/ @Model.PageCount</span>
+                                </span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="nextPage" title="Next page" aria-label="Next page">
+                                    <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+                            <span class="vm-divider" aria-hidden="true"></span>
+                        }
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Zoom">
+                            <button type="button" class="btn btn-outline-secondary" id="zoomOut" title="Zoom out" aria-label="Zoom out">
+                                <i class="bi bi-dash-lg"></i>
+                            </button>
+                            <span class="btn btn-outline-secondary disabled vm-zoom-pct" id="zoomPct" aria-live="polite">100%</span>
+                            <button type="button" class="btn btn-outline-secondary" id="zoomIn" title="Zoom in" aria-label="Zoom in">
+                                <i class="bi bi-plus-lg"></i>
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="zoomFit" title="Fit to width">
+                            <i class="bi bi-arrows-angle-contract"></i> Fit width
+                        </button>
+                    </div>
+                }
+                <div id="stageViewport" class="stage-viewport">
+                    <div id="stage" class="visual-stage zone-stage">
+                        <img id="pageImg" alt="page" />
+                        <div id="overlay" class="visual-overlay"></div>
+                    </div>
                 </div>
                 <div id="noDoc" class="text-center text-body-secondary py-5 d-none">
                     <i class="bi bi-inbox fs-3 d-block mb-2"></i>
@@ -53,7 +85,7 @@
 
     @* ---------------- RIGHT: mode, fields, hints ---------------- *@
     <div class="col-lg-5">
-        <div class="card h-100">
+        <div class="card zone-fields-card">
             <div class="card-header">
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <label class="small text-body-secondary mb-0">Template</label>
@@ -64,23 +96,23 @@
                         }
                     </select>
                 </div>
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 mb-2">
                     <label class="small text-body-secondary mb-0">Mapping mode</label>
                     <select id="modeSelect" class="form-select form-select-sm" style="max-width: 220px;">
                         <option value="OCR_FIRST">OCR-first (blocks)</option>
                         <option value="ZONAL">Zonal (drawn zones)</option>
                     </select>
                 </div>
-            </div>
-            <div class="card-body">
-                <div class="input-group input-group-sm mb-2">
+                <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input id="filter" class="form-control" placeholder="Filter…" />
                 </div>
+            </div>
+            <div class="card-body">
                 <div id="pane-fields"></div>
             </div>
-            <div class="card-footer d-flex justify-content-between align-items-center">
-                <div class="btn-group btn-group-sm" role="group">
+            <div class="card-footer zone-footer d-flex flex-wrap align-items-center gap-2">
+                <div class="btn-group btn-group-sm zone-footer-actions" role="group">
                     <button type="button" class="btn btn-outline-primary" id="addField">
                         <i class="bi bi-plus-lg"></i> New field
                     </button>
@@ -88,8 +120,8 @@
                         <i class="bi bi-table"></i> New table
                     </button>
                 </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span id="status" class="small text-body-secondary"></span>
+                <div class="zone-footer-save d-flex align-items-center gap-2 ms-auto">
+                    <span id="status" class="zone-status small text-body-secondary"></span>
                     <button type="button" class="btn btn-sm btn-primary" id="saveBtn"><i class="bi bi-save"></i> Save</button>
                 </div>
             </div>
@@ -101,5 +133,6 @@
 
 @section Scripts {
     <script src="~/js/overlay.js" asp-append-version="true"></script>
+    <script src="~/js/doc-viewport.js" asp-append-version="true"></script>
     <script src="~/js/zone-designer.js" asp-append-version="true"></script>
 }
