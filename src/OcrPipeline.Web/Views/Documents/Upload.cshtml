@@ -4,23 +4,49 @@
 }
 <div class="row justify-content-center">
     <div class="col-md-7">
-        <h1 class="h3 mb-3">Upload document</h1>
+        @* ---- header + pipeline subtitle ---- *@
+        <div class="mb-3">
+            <h1 class="h3 mb-1"><i class="bi bi-upload text-body-secondary"></i> Upload document</h1>
+            <div class="text-body-secondary small">
+                On upload the pipeline runs: classify → OCR (text + tables) → map to model.
+            </div>
+        </div>
+
+        @* server-side validation summary (source of truth; works even if the client JS is bypassed) *@
         <div asp-validation-summary="All" class="text-danger small mb-2"></div>
 
         <div class="card">
             <div class="card-body">
-                <form method="post" asp-action="Upload" enctype="multipart/form-data">
+                <form method="post" asp-action="Upload" enctype="multipart/form-data" id="uploadForm">
                     @Html.AntiForgeryToken()
+
+                    @* ---- file: drag-and-drop zone (click-to-browse too); the real input stays required ---- *@
                     <div class="mb-3">
                         <label class="form-label">Document file (PDF / image)</label>
-                        <input type="file" name="file" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.tiff" required />
-                        <div class="form-text">
-                            On upload the pipeline runs: classify → OCR (text + tables) → map to model.
+                        <div id="dropZone" class="upload-dropzone" role="button" tabindex="0"
+                             aria-label="Choose a file or drag one here">
+                            <input type="file" id="fileInput" name="file" class="upload-file-input"
+                                   accept=".pdf,.png,.jpg,.jpeg,.tiff" required />
+                            <div class="upload-dz-prompt" id="dzPrompt">
+                                <i class="bi bi-cloud-arrow-up upload-dz-icon"></i>
+                                <div>Drag a file here, or <span class="text-primary fw-semibold">browse</span></div>
+                                <div class="small text-body-secondary">PDF, PNG, JPG, or TIFF</div>
+                            </div>
+                            <div class="upload-dz-file d-none" id="dzFile">
+                                <i class="bi bi-file-earmark-text fs-4 text-body-secondary"></i>
+                                <span class="text-truncate">
+                                    <span id="fileName" class="fw-semibold"></span>
+                                    <span id="fileSize" class="text-body-secondary small"></span>
+                                </span>
+                                <button type="button" id="clearFile" class="btn-close ms-auto" aria-label="Remove file"></button>
+                            </div>
                         </div>
                     </div>
+
+                    @* ---- template (required) ---- *@
                     <div class="mb-3">
                         <label class="form-label">Template / layout</label>
-                        <select name="templateId" class="form-select" required>
+                        <select name="templateId" id="templateSelect" class="form-select" required>
                             <option value="" disabled selected>Choose a template…</option>
                             @foreach (var t in Model.Templates)
                             {
@@ -32,6 +58,8 @@
                             (first / continuation / last) automatically by page position.
                         </div>
                     </div>
+
+                    @* ---- OCR language ---- *@
                     <div class="mb-3">
                         <label class="form-label">OCR language</label>
                         <select name="ocrLanguages" class="form-select">
@@ -46,11 +74,19 @@
                             (Applies to the offline Tesseract engine; Document AI auto-detects.)
                         </div>
                     </div>
-                    <button class="btn btn-primary" type="submit">
-                        <i class="bi bi-play-fill"></i> Upload & process
+
+                    @* ---- submit: disabled until a file + template are chosen; spins while processing ---- *@
+                    <button class="btn btn-primary btn-lg" type="submit" id="submitBtn" disabled>
+                        <span class="spinner-border spinner-border-sm d-none" id="submitSpinner" role="status" aria-hidden="true"></span>
+                        <i class="bi bi-play-fill" id="submitIcon"></i>
+                        <span id="submitLabel">Upload &amp; process</span>
                     </button>
                 </form>
             </div>
         </div>
     </div>
 </div>
+
+@section Scripts {
+    <script src="~/js/upload.js" asp-append-version="true"></script>
+}
