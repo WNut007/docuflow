@@ -32,6 +32,7 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 // Select OCR provider via config "Ocr:Provider" (Tesseract | GoogleDocAi).
 builder.Services.Configure<GoogleDocAiOptions>(builder.Configuration.GetSection("Ocr:GoogleDocAi"));
 builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("Ocr:Tesseract"));
+builder.Services.Configure<PaddleOptions>(builder.Configuration.GetSection("Ocr:Paddle"));
 
 // Shared, stateless OCR helpers (pure normalization + managed image preprocessing).
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
@@ -46,9 +47,15 @@ if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase
 else
     builder.Services.AddScoped<IOcrEngine, TesseractOcrEngine>();
 
-// Zonal (template-based) OCR always uses Tesseract for cropped-region reads, regardless of the
-// whole-document provider above (Document AI does not do per-zone cropping).
-builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
+// Zonal (template-based) OCR reads cropped regions independently of the whole-document provider above
+// (Document AI does not do per-zone cropping). Select via "Ocr:RegionProvider" (Tesseract | Paddle);
+// Paddle posts crops to the PaddleOCR sidecar (ocr-service/) for far higher word accuracy, Tesseract
+// stays the offline default so the app runs without Docker.
+var regionProvider = builder.Configuration["Ocr:RegionProvider"] ?? "Tesseract";
+if (string.Equals(regionProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddScoped<IRegionOcrEngine, PaddleRegionOcrEngine>();
+else
+    builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
 
 builder.Services.AddScoped<ExtractionService>();
 builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();

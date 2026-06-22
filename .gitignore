@@ -22,3 +22,6 @@ appsettings.*.local.json
 # OS cruft
 Thumbs.db
 .DS_Store
+
+# PP-Structure STEP-1 capture outputs (generated)
+ocr-service/captures/
