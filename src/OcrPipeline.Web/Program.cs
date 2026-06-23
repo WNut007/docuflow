@@ -42,21 +42,26 @@ builder.Services.AddSingleton<OcrPipeline.Web.Services.Imaging.PagePreviewRender
 builder.Services.AddSingleton<DocumentAiMapper>();          // shared Document-proto -> OcrExtraction mapper
 builder.Services.AddSingleton<IPdfPageCounter, PdfPageCounter>();
 
+// Tesseract is always resolvable as a concrete service: it is the offline IOcrEngine/IRegionOcrEngine
+// default AND the engine PaddleRegionOcrEngine degrades to when the sidecar is unreachable. The interface
+// registrations below alias this single per-scope instance so it is never built twice in one scope.
+builder.Services.AddScoped<TesseractOcrEngine>();
+
 var ocrProvider = builder.Configuration["Ocr:Provider"] ?? "Tesseract";
 if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddScoped<IOcrEngine, GoogleDocumentAiEngine>();
 else
-    builder.Services.AddScoped<IOcrEngine, TesseractOcrEngine>();
+    builder.Services.AddScoped<IOcrEngine>(sp => sp.GetRequiredService<TesseractOcrEngine>());
 
 // Zonal (template-based) OCR reads cropped regions independently of the whole-document provider above
 // (Document AI does not do per-zone cropping). Select via "Ocr:RegionProvider" (Tesseract | Paddle);
 // Paddle posts crops to the PaddleOCR sidecar (ocr-service/) for far higher word accuracy, Tesseract
-// stays the offline default so the app runs without Docker.
+// stays the offline default so the app runs without Docker — and is the fallback when the sidecar is down.
 var regionProvider = builder.Configuration["Ocr:RegionProvider"] ?? "Tesseract";
 if (string.Equals(regionProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddScoped<IRegionOcrEngine, PaddleRegionOcrEngine>();
 else
-    builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
+    builder.Services.AddScoped<IRegionOcrEngine>(sp => sp.GetRequiredService<TesseractOcrEngine>());
 
 builder.Services.AddScoped<ExtractionService>();
 builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();

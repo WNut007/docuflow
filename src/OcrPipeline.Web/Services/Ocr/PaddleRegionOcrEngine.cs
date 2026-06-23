@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace OcrPipeline.Web.Services.Ocr;
@@ -15,10 +16,17 @@ namespace OcrPipeline.Web.Services.Ocr;
 /// PaddleOCR's recognizer is far stronger than Tesseract on the Michelin-class invoices (avg word conf
 /// ~0.99 vs Tesseract), so its word boxes feed the existing TableRowSegmenter directly. The Tesseract-only
 /// hints <c>psm</c> and <c>whitelist</c> have no PaddleOCR equivalent and are ignored.
+///
+/// FALLBACK: the sidecar is an out-of-process dependency (Docker), so a transport failure (sidecar down,
+/// timeout, non-2xx, malformed body) DEGRADES to the offline <see cref="TesseractOcrEngine"/> for that
+/// read rather than failing the document — the Tesseract-only <c>psm</c>/<c>whitelist</c> hints, ignored
+/// by Paddle, are honoured on the fallback path. A genuine caller cancellation always propagates.
 /// </summary>
 public sealed class PaddleRegionOcrEngine(
     IHttpClientFactory httpClientFactory,
-    IOptions<PaddleOptions> options) : IRegionOcrEngine
+    TesseractOcrEngine tesseractFallback,
+    IOptions<PaddleOptions> options,
+    ILogger<PaddleRegionOcrEngine> logger) : IRegionOcrEngine
 {
     private readonly PaddleOptions _o = options.Value;
 
@@ -31,7 +39,18 @@ public sealed class PaddleRegionOcrEngine(
     public async Task<(string Text, decimal Confidence)> OcrRegionAsync(
         string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default)
     {
-        var resp = await PostAsync(imagePath, ct);
+        OcrResponse resp;
+        try
+        {
+            resp = await PostAsync(imagePath, ct);
+        }
+        catch (Exception ex) when (IsSidecarFailure(ex, ct))
+        {
+            logger.LogWarning(ex,
+                "PaddleOCR sidecar unavailable ({BaseUrl}); falling back to Tesseract for this cell read.", _o.BaseUrl);
+            return await tesseractFallback.OcrRegionAsync(imagePath, psm, whitelist, languages, ct);
+        }
+
         var words = resp.Words ?? [];
         if (words.Count == 0) return (string.Empty, 0m);
 
@@ -47,7 +66,18 @@ public sealed class PaddleRegionOcrEngine(
     public async Task<IReadOnlyList<RegionWord>> OcrRegionWordsAsync(
         string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default)
     {
-        var resp = await PostAsync(imagePath, ct);
+        OcrResponse resp;
+        try
+        {
+            resp = await PostAsync(imagePath, ct);
+        }
+        catch (Exception ex) when (IsSidecarFailure(ex, ct))
+        {
+            logger.LogWarning(ex,
+                "PaddleOCR sidecar unavailable ({BaseUrl}); falling back to Tesseract for this zone word read.", _o.BaseUrl);
+            return await tesseractFallback.OcrRegionWordsAsync(imagePath, psm, whitelist, languages, ct);
+        }
+
         float w = resp.PageWidth, h = resp.PageHeight;
         if (w <= 0 || h <= 0 || resp.Words is null) return [];
 
@@ -64,6 +94,15 @@ public sealed class PaddleRegionOcrEngine(
     }
 
     // ---- helpers --------------------------------------------------------------
+
+    /// <summary>True for a sidecar transport failure we should degrade to Tesseract for — connection
+    /// refused / DNS / non-2xx (<see cref="HttpRequestException"/>), the HttpClient timeout
+    /// (<see cref="TaskCanceledException"/> NOT raised by the caller's token), or a missing/empty body
+    /// (<see cref="InvalidOperationException"/> from <see cref="PostAsync"/>). A genuine caller
+    /// cancellation (<paramref name="ct"/> signalled) returns false so it propagates unchanged.</summary>
+    private static bool IsSidecarFailure(Exception ex, CancellationToken ct) =>
+        !ct.IsCancellationRequested
+        && ex is HttpRequestException or TaskCanceledException or InvalidOperationException;
 
     private async Task<OcrResponse> PostAsync(string imagePath, CancellationToken ct)
     {
