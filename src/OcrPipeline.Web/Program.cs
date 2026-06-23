@@ -33,6 +33,7 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.Configure<GoogleDocAiOptions>(builder.Configuration.GetSection("Ocr:GoogleDocAi"));
 builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("Ocr:Tesseract"));
 builder.Services.Configure<PaddleOptions>(builder.Configuration.GetSection("Ocr:Paddle"));
+builder.Services.Configure<OcrPipeline.Web.Services.Zonal.LineItemConsolidationOptions>(builder.Configuration.GetSection("Ocr:LineItemConsolidation"));
 
 // Shared, stateless OCR helpers (pure normalization + managed image preprocessing).
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
