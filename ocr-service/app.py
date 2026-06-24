@@ -20,31 +20,32 @@ import time
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from PIL import Image
 
 app = FastAPI(title="docuflow-ppstructure", version="0.1")
 
 # Lazily-built, long-lived engines (models load once per process; that's why this is a service, not a
-# per-call CLI). English recognizer is fine for the Latin/German Michelin invoice; lang is swappable.
-_structure = None
-_ocr = None
+# per-call CLI), cached PER LANGUAGE: one recognizer model per lang. "en" is fine for the Latin/German
+# Michelin invoice (and is what the Dockerfile bakes); other langs (e.g. "th" for Thai) are built on
+# first request — their models download at runtime since only "en" is baked. Default stays "en" so the
+# existing English path is unchanged. Mirrors how the .NET side selects Tesseract languages per call.
+_structure: dict[str, Any] = {}
+_ocr: dict[str, Any] = {}
 
 
-def _structure_engine():
-    global _structure
-    if _structure is None:
+def _structure_engine(lang: str = "en"):
+    if lang not in _structure:
         from paddleocr import PPStructure
-        _structure = PPStructure(table=True, ocr=True, lang="en", show_log=False)
-    return _structure
+        _structure[lang] = PPStructure(table=True, ocr=True, lang=lang, show_log=False)
+    return _structure[lang]
 
 
-def _ocr_engine():
-    global _ocr
-    if _ocr is None:
+def _ocr_engine(lang: str = "en"):
+    if lang not in _ocr:
         from paddleocr import PaddleOCR
-        _ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
-    return _ocr
+        _ocr[lang] = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+    return _ocr[lang]
 
 
 def _to_bgr(file_bytes: bytes) -> np.ndarray:
@@ -80,12 +81,12 @@ def health():
 
 
 @app.post("/structure")
-async def structure(file: UploadFile = File(...)):
+async def structure(file: UploadFile = File(...), lang: str = Form("en")):
     data = await file.read()
     img = _to_bgr(data)
     h, w = img.shape[:2]
     t0 = time.perf_counter()
-    result = _structure_engine()(img)  # list of region dicts: type/bbox/res (+ res.html/res.cell_bbox for tables)
+    result = _structure_engine(lang)(img)  # list of region dicts: type/bbox/res (+ res.html/res.cell_bbox for tables)
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     # Best-effort normalized contract (refined once we see raw_debug). Region/cell bboxes are PIXELS
@@ -112,12 +113,12 @@ async def structure(file: UploadFile = File(...)):
 
 
 @app.post("/ocr")
-async def ocr(file: UploadFile = File(...)):
+async def ocr(file: UploadFile = File(...), lang: str = Form("en")):
     data = await file.read()
     img = _to_bgr(data)
     h, w = img.shape[:2]
     t0 = time.perf_counter()
-    result = _ocr_engine().ocr(img, cls=True)
+    result = _ocr_engine(lang).ocr(img, cls=True)
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     words = []
