@@ -74,7 +74,7 @@ public sealed class VisualSavePartialTests
             => throw new NotSupportedException();
     }
 
-    private static MappingController NewController(FakeMappingRepository m) => new(m, new StubDocs(), new StubIngestion());
+    private static MappingController NewController(FakeMappingRepository m) => new(m, new StubDocs(), new StubIngestion(), new OcrPipeline.Web.Services.Zonal.NullTableLayoutDetector());
 
     [Fact]
     public void Rebinding_only_field_A_leaves_field_B_untouched()

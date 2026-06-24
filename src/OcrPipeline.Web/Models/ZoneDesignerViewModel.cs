@@ -86,6 +86,18 @@ public sealed class ZoneFieldPayload
     public List<ZoneColumnPayload> Columns { get; set; } = new();
 }
 
+/// <summary>Request for Option ③-B auto-columns: the table zone the user drew (page-normalized 0..1) on a
+/// page of the template's sample. The document is resolved server-side from <see cref="TemplateId"/>.</summary>
+public sealed class DetectTablesPayload
+{
+    public int TemplateId { get; set; }
+    public int Page { get; set; }
+    public double ZoneX { get; set; }
+    public double ZoneY { get; set; }
+    public double ZoneW { get; set; }
+    public double ZoneH { get; set; }
+}
+
 public sealed class ZoneColumnPayload
 {
     public int ColumnId { get; set; }

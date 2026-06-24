@@ -103,6 +103,11 @@
             border-left: 2px solid rgba(25,135,84,.9); cursor: ew-resize; }
 .zone-armed .zone-sep { border-left-color: rgba(255,140,0,.95); }
 
+/* Auto-detected, not-yet-adopted columns (Option 3B): amber DASHED until the user edits or adopts them.
+   Cleared the moment the user renames a column, drags a separator, or moves/redraws the zone. */
+.zone-box.zone-draft { border-color: rgba(255,140,0,.9); background: rgba(255,140,0,.12); }
+.zone-sep-draft { border-left-style: dashed; border-left-width: 3px; border-left-color: rgba(255,140,0,.95); }
+
 /* Zone designer footer (item 4 ①): keep [New field|New table] and Save fixed-width; let the long
    status string truncate with an ellipsis between them instead of overlapping the buttons. The
    footer wraps to a second line only when even the truncated status can't fit (narrow col-lg-5). */

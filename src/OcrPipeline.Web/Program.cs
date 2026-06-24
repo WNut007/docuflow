@@ -63,6 +63,15 @@ if (string.Equals(regionProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
 else
     builder.Services.AddScoped<IRegionOcrEngine>(sp => sp.GetRequiredService<TesseractOcrEngine>());
 
+// Table-layout auto-detect for the zone designer (Option ③-B "rough-box → auto-columns"). Selected by
+// "Ocr:TableDetect:Provider" (Paddle | None). Default None => the Auto-detect button is present but inert
+// (returns a note), so an unconfigured deployment is unchanged and manual drawing is unaffected.
+var tableDetectProvider = builder.Configuration["Ocr:TableDetect:Provider"] ?? "None";
+if (string.Equals(tableDetectProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddScoped<OcrPipeline.Web.Services.Zonal.ITableLayoutDetector, PaddleStructureTableDetector>();
+else
+    builder.Services.AddScoped<OcrPipeline.Web.Services.Zonal.ITableLayoutDetector, OcrPipeline.Web.Services.Zonal.NullTableLayoutDetector>();
+
 builder.Services.AddScoped<ExtractionService>();
 builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
 

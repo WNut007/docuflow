@@ -74,7 +74,8 @@ public sealed class ZonesDesignerSampleTests
     private static ZoneDesignerViewModel RunZones(MappingTemplate template, Document? sampleDoc, out FakeDocs docs)
     {
         docs = new FakeDocs(sampleDoc);
-        var controller = new MappingController(new FakeMapping(template), docs, new StubIngestion());
+        var controller = new MappingController(new FakeMapping(template), docs, new StubIngestion(),
+            new OcrPipeline.Web.Services.Zonal.NullTableLayoutDetector());
         var result = controller.Zones(template.TemplateId);
         return Assert.IsType<ZoneDesignerViewModel>(Assert.IsType<ViewResult>(result).Model);
     }
@@ -104,5 +105,67 @@ public sealed class ZonesDesignerSampleTests
         Assert.Null(vm.DocumentId);                  // -> view shows the "no sample yet" empty-state
         Assert.Equal(0, vm.PageCount);
         Assert.Empty(docs.GetByIdCalls);             // never hits the document repo when unbound
+    }
+
+    // ---- DetectTables (Option 3B auto-columns endpoint) -----------------------
+
+    private sealed class StubDetector(OcrPipeline.Web.Services.Zonal.ColumnDetectionResult result)
+        : OcrPipeline.Web.Services.Zonal.ITableLayoutDetector
+    {
+        public int Calls; public long DocId; public int Page; public OcrPipeline.Web.Services.Zonal.RectN Zone;
+        public Task<OcrPipeline.Web.Services.Zonal.ColumnDetectionResult> DetectColumnsAsync(
+            long documentId, int page, OcrPipeline.Web.Services.Zonal.RectN zone, CancellationToken ct = default)
+        { Calls++; DocId = documentId; Page = page; Zone = zone; return Task.FromResult(result); }
+    }
+
+    private static MappingController NewDetectController(MappingTemplate tpl, OcrPipeline.Web.Services.Zonal.ITableLayoutDetector detector)
+        => new(new FakeMapping(tpl), new FakeDocs(null), new StubIngestion(), detector);
+
+    private static object Val(IActionResult r) => Assert.IsType<JsonResult>(r).Value!;
+    private static object? Prop(object o, string name) => o.GetType().GetProperty(name)!.GetValue(o);
+
+    [Fact]
+    public async Task DetectTables_with_no_sample_returns_a_note_and_never_calls_the_detector()
+    {
+        var tpl = new MappingTemplate { TemplateId = 7, MappingMode = "ZONAL", DocumentTypeId = 1, SampleDocumentId = null };
+        var det = new StubDetector(OcrPipeline.Web.Services.Zonal.ColumnDetectionResult.Empty("x"));
+        var c = NewDetectController(tpl, det);
+
+        var v = Val(await c.DetectTables(new DetectTablesPayload { TemplateId = 7, Page = 1, ZoneX = 0.1, ZoneY = 0.1, ZoneW = 0.5, ZoneH = 0.3 }, default));
+
+        Assert.Equal(0, det.Calls);                                  // no sample => no detection attempt
+        Assert.Equal(0, Prop(v, "columnCount"));
+        Assert.Contains("no sample", ((string?)Prop(v, "note"))!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DetectTables_with_a_degenerate_zone_returns_a_note_and_never_calls_the_detector()
+    {
+        var tpl = new MappingTemplate { TemplateId = 9, MappingMode = "ZONAL", DocumentTypeId = 1, SampleDocumentId = 49 };
+        var det = new StubDetector(OcrPipeline.Web.Services.Zonal.ColumnDetectionResult.Empty("x"));
+        var c = NewDetectController(tpl, det);
+
+        var v = Val(await c.DetectTables(new DetectTablesPayload { TemplateId = 9, Page = 1, ZoneW = 0, ZoneH = 0 }, default));
+
+        Assert.Equal(0, det.Calls);                                  // empty/whole-page crop never posted
+        Assert.Contains("Draw a table zone", ((string?)Prop(v, "note"))!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DetectTables_delegates_to_the_detector_on_the_server_resolved_sample()
+    {
+        var tpl = new MappingTemplate { TemplateId = 9, MappingMode = "ZONAL", DocumentTypeId = 1, SampleDocumentId = 49 };
+        var det = new StubDetector(new OcrPipeline.Web.Services.Zonal.ColumnDetectionResult(new[] { 0.3, 0.6 }, 3, null));
+        var c = NewDetectController(tpl, det);
+
+        var v = Val(await c.DetectTables(new DetectTablesPayload { TemplateId = 9, Page = 2, ZoneX = 0.1, ZoneY = 0.2, ZoneW = 0.5, ZoneH = 0.3 }, default));
+
+        Assert.Equal(1, det.Calls);
+        Assert.Equal(49L, det.DocId);                                // sample resolved from the template, NOT the client
+        Assert.Equal(2, det.Page);
+        Assert.Equal(0.5, det.Zone.W, 6);
+        Assert.Equal(3, Prop(v, "columnCount"));
+        Assert.Equal(new[] { 0.3, 0.6 }, (IReadOnlyList<double>)Prop(v, "boundaries")!);
+        Assert.Null(Prop(v, "note"));
     }
 }
