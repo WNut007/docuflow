@@ -24,6 +24,7 @@ public sealed class MultiPageBuildTests
         var engine = new MappingEngine(new TransformerPipeline(System.Array.Empty<IValueTransformer>()), new TextNormalizer());
         // image/OCR deps are unused on the delegate-seam path -> null! is fine (mirrors ZonalTableBuildTests).
         return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()),
+            Options.Create(new OcrPipeline.Web.Services.Zonal.LineItemConsolidationOptions()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ZonalExtractionService>.Instance);
     }
 

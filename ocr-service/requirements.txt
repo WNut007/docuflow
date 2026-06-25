@@ -1,0 +1,20 @@
+# Runtime deps LAYERED ON the official `paddlepaddle/paddle:2.6.2` base (see Dockerfile). That base
+# already ships a WORKING paddle 2.6.2 with a matched glibc/MKL/protobuf toolchain — the plain pip
+# `paddlepaddle==2.6.2` wheel on `python:3.10-slim` segfaults (`free(): invalid pointer`) the moment
+# paddle runs an op, so we do NOT pip-install paddlepaddle here; it comes from the base image.
+#
+# PP-Structure (table recognition) lives in paddleocr 2.7.x via the PPStructure(table=True) API, which
+# returns table HTML + per-cell pixel bboxes — the shape STEP ① validates.
+#
+# Two hard pins keep the install sane (an unconstrained `pip install paddleocr` breaks both):
+#   numpy < 2                       paddle 2.6.2 is NOT numpy-2 ready; transitive deps otherwise pull 2.x
+#   exactly ONE opencv (contrib)    opencv-python / -headless overlap and clobber cv2 -> AttributeError;
+#                                   opencv-contrib-python is a superset providing full cv2. The Dockerfile
+#                                   purges any other opencv pip drags in and reinstalls just this one.
+paddleocr==2.7.3
+numpy==1.26.4
+opencv-contrib-python==4.6.0.66
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+pillow==10.3.0

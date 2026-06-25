@@ -31,7 +31,8 @@
             ocrHint: f.zoneOcrHint || "TEXT", psm: f.zonePsm || null,
             role: f.zonePageRole || "",            // "" = single page; FIRST/CONTINUATION/LAST = multi-page (Phase 3)
             columns: (f.columns || []).map(normalizeColumn),
-            _changed: false
+            _changed: false,
+            _draft: false           // true only for freshly auto-detected, not-yet-adopted columns
         };
     }
     function normalizeColumn(c) {
@@ -48,7 +49,11 @@
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     function setStatus(t) { $("status").textContent = t || ""; }
     const clamp01 = v => Math.max(0, Math.min(1, v));
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const isTable = f => f.sourceType === "TABLE_CELL";
+    // Any user edit ADOPTS a field: mark it dirty AND clear auto-detect draft state, so the dashed
+    // auto-detected columns solidify into an ordinary unsaved field (Option 3B draft-not-commit).
+    function touch(f) { f._changed = true; f._draft = false; }
 
     const ROLES = ["FIRST", "CONTINUATION", "LAST"];
     const ROLE_LABELS = { "": "Single page", FIRST: "First (header)", CONTINUATION: "Continuation", LAST: "Last (totals)" };
@@ -92,12 +97,12 @@
     function addColumn(f) {
         f.columns.push(normalizeColumn({ targetSubProperty: "", dataType: "STRING" }));
         if (!f.columns.some(c => c.isAnchor)) f.columns[0].isAnchor = true;
-        reflowColumns(f); f._changed = true; renderFields(); renderOverlay();
+        reflowColumns(f); touch(f); renderFields(); renderOverlay();
     }
     function removeColumn(f, idx) {
         f.columns.splice(idx, 1);
         if (f.columns.length && !f.columns.some(c => c.isAnchor)) f.columns[0].isAnchor = true;
-        reflowColumns(f); f._changed = true; renderFields(); renderOverlay();
+        reflowColumns(f); touch(f); renderFields(); renderOverlay();
     }
     // Phase 3: copy the column definitions from the FIRST-role table region of the same property (or
     // any sibling table with columns) so CONTINUATION/LAST regions don't redraw the sub-fields. Their
@@ -117,6 +122,62 @@
         f._changed = true; renderFields(); renderOverlay();
     }
 
+    // ---- auto-detect columns (Option 3B: rough box -> auto-columns) ------------
+    // POST the drawn table zone; the server crops it, asks the detector for column separators, and returns
+    // them PAGE-normalized. We turn them into a DRAFT column set (dashed) the user reviews/adjusts — never
+    // saved until adopted (named). No zone => no request (guarded here AND the button is disabled).
+    async function detectColumns(f) {
+        if (!isTable(f)) return;
+        if (f.zoneX == null) { setStatus("Draw this table’s zone first, then Auto-detect."); return; }
+        setStatus("Detecting columns…");
+        try {
+            const res = await fetch("/Mapping/DetectTables", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "RequestVerificationToken": token },
+                body: JSON.stringify({
+                    templateId: state.templateId, page: f.zonePage || state.page,
+                    zoneX: f.zoneX, zoneY: f.zoneY, zoneW: f.zoneW, zoneH: f.zoneH
+                })
+            });
+            if (!res.ok) { setStatus("Auto-detect failed (" + res.status + ")."); return; }
+            const j = await res.json();
+            const seps = (j && j.boundaries) || [];
+            if (!seps.length) { setStatus((j && j.note) || "No columns detected — draw them manually."); return; }
+            applyDetectedColumns(f, seps);
+            setStatus(`Detected ${seps.length + 1} columns — review the dashed draft, name each column, then Save.`);
+        } catch (e) {
+            setStatus("Auto-detect failed: " + (e && e.message ? e.message : e));
+        }
+    }
+
+    // Build a DRAFT contiguous column set from page-normalized interior separators within the zone.
+    function applyDetectedColumns(f, pageSeps) {
+        const lo = f.zoneX, hi = f.zoneX + f.zoneW;
+        const xs = pageSeps
+            .map(x => clamp(x, lo + 0.005, hi - 0.005))
+            .sort((a, b) => a - b)
+            .filter((x, i, a) => i === 0 || x - a[i - 1] > 0.004);   // drop separators that collapse together
+        const edges = [lo, ...xs, hi];
+        f.columns = [];
+        for (let i = 0; i < edges.length - 1; i++)
+            f.columns.push(normalizeColumn({ targetSubProperty: "", dataType: "STRING", colXStart: edges[i], colXEnd: edges[i + 1], sortOrder: i }));
+        if (f.columns.length) f.columns[0].isAnchor = true;     // sensible default; the user re-picks the anchor
+        f._draft = true;        // dashed until adopted/edited
+        f._changed = true;      // dirty, but the blank column/field names keep it OUT of the DB until named
+        const idx = state.fields.indexOf(f);
+        if (idx >= 0) state.armed = idx;   // arm it so the dashed draft separators are visible immediately
+        renderFields(); renderOverlay();
+    }
+
+    // Discard the auto-detected draft: revert to the standard starter columns (same as a new table).
+    function discardDraft(f) {
+        f.columns = defaultTableColumns();
+        if (f.zoneX != null) reflowColumns(f);
+        f._draft = false; f._changed = true;
+        renderFields(); renderOverlay();
+        setStatus("Auto-detected columns discarded — reset to default columns.");
+    }
+
     // ---- overlay (existing zones + table separators) --------------------------
     function renderOverlay() {
         const specs = [];
@@ -125,7 +186,7 @@
             const armed = idx === state.armed;
             specs.push({
                 bbox: { left: f.zoneX, top: f.zoneY, width: f.zoneW, height: f.zoneH },
-                className: "zone-box" + (armed ? " zone-armed" : "") + (isTable(f) ? " zone-table" : ""),
+                className: "zone-box" + (armed ? " zone-armed" : "") + (isTable(f) ? " zone-table" : "") + (f._draft ? " zone-draft" : ""),
                 title: f.targetProperty,
                 build: d => {
                     d.dataset.fieldIdx = idx;
@@ -144,7 +205,7 @@
         for (let i = 0; i < f.columns.length - 1; i++) {
             const pageX = f.columns[i].colXEnd;
             if (pageX == null) continue;
-            const sep = el("span", "zone-sep");
+            const sep = el("span", "zone-sep" + (f._draft ? " zone-sep-draft" : ""));
             sep.style.left = clamp01((pageX - f.zoneX) / f.zoneW) * 100 + "%";
             sep.dataset.sep = String(i);
             sep.dataset.fieldIdx = String(fieldIdx);
@@ -223,6 +284,7 @@
             f.zoneX = f.zoneY = f.zoneW = f.zoneH = null;   // discard accidental click (tiny dot in BOTH axes)
         } else {
             f._changed = true;
+            f._draft = false;   // moving/resizing/redrawing the zone or dragging a separator adopts the columns
             if (drag.mode === "draw" && isTable(f)) reflowColumns(f);
             // A redraw NEVER changes an existing region's role: role is the region's logical slot in
             // its table group, not the page on screen. Only a brand-new, still-role-less TABLE region
@@ -341,7 +403,8 @@
         const name = el("input", "form-control form-control-sm fw-semibold"); name.value = g.name; name.placeholder = "table name (e.g. line_item)";
         name.addEventListener("input", () => {
             g.name = name.value;
-            g.items.forEach(({ f }) => { f.targetProperty = name.value; f._changed = true; });
+            g.items.forEach(({ f }) => { f.targetProperty = name.value; touch(f); });
+            renderOverlay();   // adopting (naming) the table solidifies any dashed draft separators
         });
         head.appendChild(name);
         body.appendChild(head);
@@ -433,13 +496,13 @@
         f.columns.forEach((c, ci) => {
             const row = el("div", "zone-col-row mb-1");
             const cn = el("input", "form-control form-control-sm"); cn.value = c.targetSubProperty; cn.placeholder = "sub-field";
-            cn.addEventListener("input", () => { c.targetSubProperty = cn.value; f._changed = true; });
+            cn.addEventListener("input", () => { c.targetSubProperty = cn.value; touch(f); renderOverlay(); });
             const ct = el("select", "form-select form-select-sm");
             ["STRING", "DECIMAL", "INT", "DATE"].forEach(o => { const op = el("option", null, o); op.selected = c.dataType === o; ct.appendChild(op); });
-            ct.addEventListener("change", () => { c.dataType = ct.value; f._changed = true; });
+            ct.addEventListener("change", () => { c.dataType = ct.value; touch(f); renderOverlay(); });
             const anchor = el("div", "form-check form-check-inline m-0");
             const ar = el("input", "form-check-input"); ar.type = "radio"; ar.name = `anchor-${fieldIdx}`; ar.checked = c.isAnchor; ar.title = "anchor column (one value per row)";
-            ar.addEventListener("change", () => { f.columns.forEach(x => x.isAnchor = false); c.isAnchor = true; f._changed = true; });
+            ar.addEventListener("change", () => { f.columns.forEach(x => x.isAnchor = false); c.isAnchor = true; touch(f); renderOverlay(); });
             anchor.append(ar, el("label", "form-check-label small zone-anchor", "⚓"));
             const rm = el("button", "btn btn-sm btn-outline-danger py-0"); rm.type = "button"; rm.appendChild(el("i", "bi bi-x"));
             rm.addEventListener("click", () => removeColumn(f, ci));
@@ -450,7 +513,20 @@
         add.addEventListener("click", () => addColumn(f));
         const copy = el("button", "btn btn-sm btn-outline-secondary zone-secondary-btn py-0", "copy columns from FIRST"); copy.type = "button";
         copy.addEventListener("click", () => copyColumnsFromFirst(f));
-        const actions = el("div", "zone-col-actions mt-1"); actions.append(add, copy); wrap.appendChild(actions);
+        // Auto-detect columns from the OCR table structure (Option 3B). Requires the table zone first, so
+        // it is DISABLED until one is drawn — never posts an empty/whole-page crop.
+        const auto = el("button", "btn btn-sm btn-outline-primary zone-secondary-btn py-0", "✨ Auto-detect columns"); auto.type = "button";
+        auto.disabled = f.zoneX == null;
+        auto.title = f.zoneX == null ? "Draw the table zone first" : "Detect columns from the OCR table structure";
+        auto.addEventListener("click", () => detectColumns(f));
+        const actions = el("div", "zone-col-actions mt-1"); actions.append(add, copy, auto);
+        if (f._draft) {     // only while an unadopted auto-detect draft is showing
+            const disc = el("button", "btn btn-sm btn-outline-danger zone-secondary-btn py-0", "Discard"); disc.type = "button";
+            disc.title = "Discard the auto-detected columns";
+            disc.addEventListener("click", () => discardDraft(f));
+            actions.append(disc);
+        }
+        wrap.appendChild(actions);
         return wrap;
     }
 

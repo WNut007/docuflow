@@ -34,6 +34,7 @@ public sealed class ZonalIntegrationTests
         var tesseract = new TesseractOcrEngine(opts, preprocessor, normalizer);
         var engine = new MappingEngine(new TransformerPipeline(System.Array.Empty<IValueTransformer>()), normalizer);
         var svc = new ZonalExtractionService(tesseract, preprocessor, new PagePreviewRenderer(), engine, normalizer, opts,
+            Options.Create(new OcrPipeline.Web.Services.Zonal.LineItemConsolidationOptions()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ZonalExtractionService>.Instance);
 
         var template = new MappingTemplate

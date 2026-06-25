@@ -82,7 +82,7 @@ public sealed class CreateTemplateValidationTests
     private static MappingController NewController(FakeMapping m, FakeIngestion ing)
     {
         var http = new DefaultHttpContext();   // non-null User (empty principal) so GetUserId() returns null cleanly
-        return new(m, new StubDocs(), ing)
+        return new(m, new StubDocs(), ing, new OcrPipeline.Web.Services.Zonal.NullTableLayoutDetector())
         {
             ControllerContext = new ControllerContext { HttpContext = http },
             TempData = new TempDataDictionary(http, new NullTempDataProvider())

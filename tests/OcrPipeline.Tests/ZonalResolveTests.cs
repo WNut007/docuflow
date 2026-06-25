@@ -24,6 +24,7 @@ public sealed class ZonalResolveTests
             new TextNormalizer());
         // image deps are unused by BuildAsync
         return new ZonalExtractionService(null!, null!, null!, engine, new TextNormalizer(), Options.Create(new TesseractOptions()),
+            Options.Create(new OcrPipeline.Web.Services.Zonal.LineItemConsolidationOptions()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ZonalExtractionService>.Instance);
     }
 

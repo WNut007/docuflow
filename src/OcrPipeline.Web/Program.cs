@@ -32,6 +32,8 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 // Select OCR provider via config "Ocr:Provider" (Tesseract | GoogleDocAi).
 builder.Services.Configure<GoogleDocAiOptions>(builder.Configuration.GetSection("Ocr:GoogleDocAi"));
 builder.Services.Configure<TesseractOptions>(builder.Configuration.GetSection("Ocr:Tesseract"));
+builder.Services.Configure<PaddleOptions>(builder.Configuration.GetSection("Ocr:Paddle"));
+builder.Services.Configure<OcrPipeline.Web.Services.Zonal.LineItemConsolidationOptions>(builder.Configuration.GetSection("Ocr:LineItemConsolidation"));
 
 // Shared, stateless OCR helpers (pure normalization + managed image preprocessing).
 builder.Services.AddSingleton<OcrPipeline.Web.Services.Normalization.TextNormalizer>();
@@ -40,15 +42,35 @@ builder.Services.AddSingleton<OcrPipeline.Web.Services.Imaging.PagePreviewRender
 builder.Services.AddSingleton<DocumentAiMapper>();          // shared Document-proto -> OcrExtraction mapper
 builder.Services.AddSingleton<IPdfPageCounter, PdfPageCounter>();
 
+// Tesseract is always resolvable as a concrete service: it is the offline IOcrEngine/IRegionOcrEngine
+// default AND the engine PaddleRegionOcrEngine degrades to when the sidecar is unreachable. The interface
+// registrations below alias this single per-scope instance so it is never built twice in one scope.
+builder.Services.AddScoped<TesseractOcrEngine>();
+
 var ocrProvider = builder.Configuration["Ocr:Provider"] ?? "Tesseract";
 if (string.Equals(ocrProvider, "GoogleDocAi", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddScoped<IOcrEngine, GoogleDocumentAiEngine>();
 else
-    builder.Services.AddScoped<IOcrEngine, TesseractOcrEngine>();
+    builder.Services.AddScoped<IOcrEngine>(sp => sp.GetRequiredService<TesseractOcrEngine>());
 
-// Zonal (template-based) OCR always uses Tesseract for cropped-region reads, regardless of the
-// whole-document provider above (Document AI does not do per-zone cropping).
-builder.Services.AddScoped<IRegionOcrEngine, TesseractOcrEngine>();
+// Zonal (template-based) OCR reads cropped regions independently of the whole-document provider above
+// (Document AI does not do per-zone cropping). Select via "Ocr:RegionProvider" (Tesseract | Paddle);
+// Paddle posts crops to the PaddleOCR sidecar (ocr-service/) for far higher word accuracy, Tesseract
+// stays the offline default so the app runs without Docker — and is the fallback when the sidecar is down.
+var regionProvider = builder.Configuration["Ocr:RegionProvider"] ?? "Tesseract";
+if (string.Equals(regionProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddScoped<IRegionOcrEngine, PaddleRegionOcrEngine>();
+else
+    builder.Services.AddScoped<IRegionOcrEngine>(sp => sp.GetRequiredService<TesseractOcrEngine>());
+
+// Table-layout auto-detect for the zone designer (Option ③-B "rough-box → auto-columns"). Selected by
+// "Ocr:TableDetect:Provider" (Paddle | None). Default None => the Auto-detect button is present but inert
+// (returns a note), so an unconfigured deployment is unchanged and manual drawing is unaffected.
+var tableDetectProvider = builder.Configuration["Ocr:TableDetect:Provider"] ?? "None";
+if (string.Equals(tableDetectProvider, "Paddle", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddScoped<OcrPipeline.Web.Services.Zonal.ITableLayoutDetector, PaddleStructureTableDetector>();
+else
+    builder.Services.AddScoped<OcrPipeline.Web.Services.Zonal.ITableLayoutDetector, OcrPipeline.Web.Services.Zonal.NullTableLayoutDetector>();
 
 builder.Services.AddScoped<ExtractionService>();
 builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();

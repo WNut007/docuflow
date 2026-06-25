@@ -14,7 +14,8 @@ namespace OcrPipeline.Web.Controllers;
 
 [Authorize]
 public sealed class MappingController(
-    IMappingRepository mapping, IDocumentRepository documents, IDocumentIngestionService ingestion) : Controller
+    IMappingRepository mapping, IDocumentRepository documents, IDocumentIngestionService ingestion,
+    ITableLayoutDetector tableDetector) : Controller
 {
     public IActionResult Index()
     {
@@ -291,6 +292,33 @@ public sealed class MappingController(
             }).ToList()
         };
         return View(vm);
+    }
+
+    /// <summary>Option ③-B "rough-box → auto-columns": given the table zone the user drew, propose its
+    /// column separators from the OCR table structure (engine-agnostic <see cref="ITableLayoutDetector"/>).
+    /// Detects on the template's OWN bound sample (resolved server-side, never a client-supplied doc id).
+    /// Always 200s with a (possibly empty) result + note — the designer stays usable when the detector is
+    /// offline/disabled. Same auth + antiforgery posture as <see cref="ZonesSave"/>.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DetectTables([FromBody] DetectTablesPayload payload, CancellationToken ct)
+    {
+        if (payload is null || payload.TemplateId <= 0) return BadRequest();
+        var tpl = mapping.GetTemplateById(payload.TemplateId);
+        if (tpl is null) return NotFound();
+
+        if (tpl.SampleDocumentId is not long sampleId)
+            return Json(new { ok = true, boundaries = Array.Empty<double>(), columnCount = 0,
+                              note = "This template has no sample document to detect on." });
+        if (payload.ZoneW <= 0 || payload.ZoneH <= 0)
+            return Json(new { ok = true, boundaries = Array.Empty<double>(), columnCount = 0,
+                              note = "Draw a table zone first, then Auto-detect." });
+
+        int page = payload.Page < 1 ? 1 : payload.Page;
+        var result = await tableDetector.DetectColumnsAsync(
+            sampleId, page, new RectN(payload.ZoneX, payload.ZoneY, payload.ZoneW, payload.ZoneH), ct);
+        return Json(new { ok = true, boundaries = result.PageColumnBoundariesX,
+                          columnCount = result.ColumnCount, note = result.Note });
     }
 
     [HttpPost]

@@ -30,9 +30,11 @@ public sealed class ZonalExtractionService(
     MappingEngine mappingEngine,
     TextNormalizer normalizer,
     IOptions<TesseractOptions> tessOptions,
+    IOptions<LineItemConsolidationOptions> consolidationOptions,
     ILogger<ZonalExtractionService> logger)
 {
     private readonly TesseractOptions _o = tessOptions.Value;
+    private readonly LineItemConsolidationOptions _consolidation = consolidationOptions.Value;
 
     /// <summary>One segmented + typed table field result: line_item rows and an aggregate confidence.</summary>
     public readonly record struct TableResult(List<Dictionary<string, object?>> Rows, decimal? Conf);
@@ -188,6 +190,7 @@ public sealed class ZonalExtractionService(
         IReadOnlyList<WordBox> zoneWords,
         int[]? inkProfile,
         Func<int, MappingTableColumn, RowBand, Task<(string Raw, decimal Conf)>> readCell,
+        ConsolidateOptions? consolidate = null,
         CancellationToken ct = default)
     {
         double zoneX = (double)(tableField.ZoneX ?? 0m), zoneW = (double)(tableField.ZoneW ?? 0m);
@@ -195,7 +198,22 @@ public sealed class ZonalExtractionService(
         double axs = TableGeometry.ToZoneRelativeX((double)(anchor.ColXStart ?? (decimal)zoneX), zoneX, zoneW);
         double axe = TableGeometry.ToZoneRelativeX((double)(anchor.ColXEnd ?? (decimal)(zoneX + zoneW)), zoneX, zoneW);
 
-        var bands = TableRowSegmenter.Segment(zoneWords, axs, axe, inkProfile: inkProfile);
+        var rawBands = TableRowSegmenter.Segment(zoneWords, axs, axe, inkProfile: inkProfile);
+
+        // Consolidate (Option A): drop the footer / qty-bearing subtotal row so it is not a phantom item.
+        // GATED — the drop/clean lexicon is layout-specific (Michelin), so it runs only when the caller
+        // opts the template in (consolidate != null); otherwise every band is kept unchanged.
+        IReadOnlyList<RowBand> bands = rawBands;
+        if (consolidate is not null)
+        {
+            var selection = LineItemConsolidator.SelectItemRows(rawBands, zoneWords, axs, axe, consolidate);
+            bands = selection.Kept;
+            foreach (var d in selection.Dropped)
+                logger.LogInformation(
+                    "LineItem consolidator dropped a footer/subtotal row in '{Property}' (qty={Qty}, footerKeyword={Kw}, qtyEqualsRunningSum={Sum}).",
+                    tableField.TargetProperty, d.Qty, d.FooterKeyword, d.QtyEqualsRunningSum);
+        }
+
         var order = normalizer.InferDayMonthOrder(zoneWords.Select(w => w.Text));
 
         // zone-relative x-range for a column (its ColX* are page-normalized like the zone rect).
@@ -212,8 +230,12 @@ public sealed class ZonalExtractionService(
             {
                 ct.ThrowIfCancellationRequested();
                 var (raw, conf) = await readCell(r, col, bands[r]);
+                IReadOnlyList<string> cellLines = (raw ?? "").Replace("\r", "").Split('\n');
+                // (b) strip shipping/reference metadata absorbed into a text (description) cell — gated.
+                if (consolidate is not null && IsTextColumn(col))
+                    cellLines = LineItemConsolidator.CleanDescriptionLines(cellLines, consolidate);
                 var collapsed = CellLineSelector.Apply(
-                    (raw ?? "").Replace("\r", "").Split('\n'), col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
+                    cellLines, col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
 
                 // Fallback: a tight per-cell crop can miss a thin glyph (a lone "1") or an edge row; the
                 // whole-zone pass already has every word, so assemble the cell from the word boxes that
@@ -226,8 +248,11 @@ public sealed class ZonalExtractionService(
                         .ToList();
                     if (cellWords.Count > 0)
                     {
+                        IReadOnlyList<string> fbLines = GroupWordsToLines(cellWords);
+                        if (consolidate is not null && IsTextColumn(col))
+                            fbLines = LineItemConsolidator.CleanDescriptionLines(fbLines, consolidate);
                         collapsed = CellLineSelector.Apply(
-                            GroupWordsToLines(cellWords), col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
+                            fbLines, col.LineSelectMode, col.LineSelectIndices, col.LineJoinSeparator);
                         conf = Math.Round(cellWords.Average(w => w.Conf), 4);
                     }
                 }
@@ -252,6 +277,8 @@ public sealed class ZonalExtractionService(
     {
         var preparedPages = new Dictionary<int, Image<L8>>();
         var tempPageFiles = new List<string>();
+        // Layout-specific line-item consolidation runs only for gated-in templates (see LineItemConsolidationOptions).
+        var consolidate = _consolidation.AppliesTo(template.TemplateId) ? new ConsolidateOptions() : null;
         try
         {
             return await BuildAsync(template,
@@ -288,7 +315,7 @@ public sealed class ZonalExtractionService(
                             var cellRect = TableGeometry.CellPixelRect(zoneRect, relS, relE, band);
                             var (cpsm, cwl) = ColumnOcr(col);
                             return await CropAndReadAsync(page, cellRect, cpsm, cwl, doc.OcrLanguages, ct);
-                        }, ct);
+                        }, consolidate: consolidate, ct: ct);
                 },
                 columnsByField,
                 ct);
@@ -312,6 +339,8 @@ public sealed class ZonalExtractionService(
     {
         var preparedPages = new Dictionary<int, Image<L8>>();
         var tempPageFiles = new List<string>();
+        // Layout-specific line-item consolidation runs only for gated-in templates (see LineItemConsolidationOptions).
+        var consolidate = _consolidation.AppliesTo(template.TemplateId) ? new ConsolidateOptions() : null;
         try
         {
             return await BuildMultiPageAsync(template, Math.Max(1, doc.PageCount),
@@ -343,7 +372,7 @@ public sealed class ZonalExtractionService(
                             var cellRect = TableGeometry.CellPixelRect(zoneRect, relS, relE, band);
                             var (cpsm, cwl) = ColumnOcr(col);
                             return await CropAndReadAsync(page, cellRect, cpsm, cwl, doc.OcrLanguages, ct);
-                        }, ct);
+                        }, consolidate: consolidate, ct: ct);
                 },
                 steps, columnsByField, ct);
         }
@@ -353,6 +382,11 @@ public sealed class ZonalExtractionService(
             foreach (var f in tempPageFiles) if (File.Exists(f)) File.Delete(f);
         }
     }
+
+    /// <summary>A free-text (description) column — the only kind the metadata line-cleaner runs on, so a
+    /// numeric/date column is never altered. Null/blank DataType is treated as text (matches ColumnOcr).</summary>
+    private static bool IsTextColumn(MappingTableColumn col)
+        => (col.DataType ?? "STRING").Trim().ToUpperInvariant() is "STRING" or "TEXT";
 
     /// <summary>OCR settings for a table cell from its column DataType: numeric/date columns get a tight
     /// single-line PSM + whitelist (reuses <see cref="ZoneHint"/>); text gets a block PSM so a wrapped

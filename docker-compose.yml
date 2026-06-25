@@ -1,0 +1,17 @@
+# Dev: the PP-Structure OCR service runs in Docker (pinned env + baked models); the .NET app runs on
+# the host via `dotnet run` and reaches this at http://localhost:8080 (Ocr:Paddle:BaseUrl). See
+# run-dev.ps1 for the one-command flow.
+services:
+  paddle-structure:
+    build: ./ocr-service
+    image: docuflow/paddle-structure:0.1
+    container_name: docuflow-paddle-structure
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
