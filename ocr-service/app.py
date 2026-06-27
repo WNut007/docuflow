@@ -1,19 +1,23 @@
 """
-PP-Structure microservice (STEP ① of the Paddle auto-draw plan).
+Paddle OCR microservice — PP-OCRv5 (PaddleOCR 3.x: PaddleOCR.predict), THAI + English.
 
-Image in -> table structure + text out, over HTTP, so the .NET app (IOcrEngine) can map it into the
-existing OcrExtraction (TextBlocks + Tables/OcrTableCell). The .NET side renders pages to PNG at the
-SAME 200-DPI backdrop frame the designer uses, posts them here, and normalizes the pixel bboxes we
-return to 0..1 against that frame -> auto-drawn separators land on the backdrop by construction.
+Image in -> text out, over HTTP, so the .NET app (PaddleRegionOcrEngine / IOcrEngine) can map it into
+the existing OcrExtraction (TextBlocks). The .NET side renders each drawn zone to PNG at the SAME 200-DPI
+backdrop frame the designer uses, posts it here, and normalizes the pixel bboxes we return to 0..1 against
+that frame.
+
+OCR-ONLY by design: this branch reaches Paddle through /ocr with MANUAL column drawing in the zonal
+designer. The PP-Structure (/structure) auto-detect path is intentionally NOT shipped here — it stays
+parked on paddle-v5-upgrade — so the v5 table-structure incompatibility never triggers and the build has
+no PPStructureV3 server-model surface to crash on.
 
 ENDPOINTS
-  GET  /health            -> {"status":"ok"}
-  POST /structure  (file) -> tables (region bbox + per-cell bbox + row/col) + page size, in PIXELS
-  POST /ocr        (file) -> words (text + bbox + conf) + page size, in PIXELS
+  GET  /health         -> {"status":"ok"}
+  POST /ocr     (file) -> words (text + bbox + conf) + page size, in PIXELS
 
-STEP ① NOTE: each response also carries "raw_debug" — the unmodified engine output — so we can SEE the
-real PP-Structure shape (cell_bbox vs html grid, coord convention, span fields) and finalize the .NET
-mapper against reality, not an assumed contract. raw_debug is dropped once the contract is locked.
+WIRE CONTRACT (the engine-agnostic seam PaddleRegionOcrEngine consumes) IS UNCHANGED:
+  /ocr -> words[] = {text, bbox=[x1,y1,x2,y2] pixels, conf}
+so PaddleRegionOcrEngine needs ZERO .NET changes across the v5 + Thai upgrade.
 """
 import io
 import time
@@ -23,27 +27,30 @@ import numpy as np
 from fastapi import FastAPI, UploadFile, File
 from PIL import Image
 
-app = FastAPI(title="docuflow-ppstructure", version="0.1")
+app = FastAPI(title="docuflow-paddle-ocr", version="0.3")
 
-# Lazily-built, long-lived engines (models load once per process; that's why this is a service, not a
-# per-call CLI). English recognizer is fine for the Latin/German Michelin invoice; lang is swappable.
-_structure = None
+# Lazily-built, long-lived engine (models load once per process; that's why this is a service, not a
+# per-call CLI). Built for THAI + English invoices.
 _ocr = None
-
-
-def _structure_engine():
-    global _structure
-    if _structure is None:
-        from paddleocr import PPStructure
-        _structure = PPStructure(table=True, ocr=True, lang="en", show_log=False)
-    return _structure
 
 
 def _ocr_engine():
     global _ocr
     if _ocr is None:
         from paddleocr import PaddleOCR
-        _ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        # Thai PP-OCRv5 MOBILE det/rec: the th_PP-OCRv5_mobile_rec recognizer reads Thai + Latin digits
+        # accurately (proven in the Phase-1 accuracy spike on doc_rt.pdf), and the MOBILE det/rec models
+        # sidestep a paddle-3.0.0 inference crash — the *server* PP-OCRv5 det/rec predictors raise
+        # `(InvalidArgument) Type of attribute: strides is not right` (a PIR/new-IR incompatibility) when
+        # created standalone. Detection is language-agnostic; recognition is the Thai-specific model.
+        _ocr = PaddleOCR(
+            lang="th",
+            text_detection_model_name="PP-OCRv5_mobile_det",
+            text_recognition_model_name="th_PP-OCRv5_mobile_rec",
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=True,
+        )
     return _ocr
 
 
@@ -52,63 +59,17 @@ def _to_bgr(file_bytes: bytes) -> np.ndarray:
     return np.array(img)[:, :, ::-1]  # RGB -> BGR for paddle/cv2
 
 
-def _jsonable(x: Any) -> Any:
-    """Recursively coerce numpy/bytes into JSON-safe values so we can dump WHATEVER the engine returns."""
-    if isinstance(x, (np.integer,)):
-        return int(x)
-    if isinstance(x, (np.floating,)):
-        return float(x)
-    if isinstance(x, np.ndarray):
-        # Elide bulky arrays to a shape marker. PP-Structure attaches each region's CROPPED IMAGE as a
-        # (H,W,3) uint8 ndarray; dumping its pixels via tolist() balloons raw_debug to ~500 MB/page. We
-        # only want the SHAPE of the contract, so keep small arrays (bboxes, scores) and stub the rest.
-        if x.size > 256:
-            return {"__ndarray__": True, "shape": list(x.shape), "dtype": str(x.dtype)}
-        return x.tolist()
-    if isinstance(x, (bytes, bytearray)):
-        return x.decode("utf-8", "replace")
-    if isinstance(x, dict):
-        return {str(k): _jsonable(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
-        return [_jsonable(v) for v in x]
-    return x
+def _unwrap(res: Any) -> dict:
+    """paddleocr 3.x result objects expose .json as {"res": {...}}; return the inner dict."""
+    d = res.json if hasattr(res, "json") else res
+    if isinstance(d, dict) and isinstance(d.get("res"), dict):
+        return d["res"]
+    return d if isinstance(d, dict) else {}
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-@app.post("/structure")
-async def structure(file: UploadFile = File(...)):
-    data = await file.read()
-    img = _to_bgr(data)
-    h, w = img.shape[:2]
-    t0 = time.perf_counter()
-    result = _structure_engine()(img)  # list of region dicts: type/bbox/res (+ res.html/res.cell_bbox for tables)
-    elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
-
-    # Best-effort normalized contract (refined once we see raw_debug). Region/cell bboxes are PIXELS
-    # [x1,y1,x2,y2] in this image's frame; the .NET mapper divides by page_width/height for 0..1.
-    tables = []
-    for region in (result or []):
-        if region.get("type") != "table":
-            continue
-        res = region.get("res", {}) or {}
-        tables.append({
-            "region_bbox": region.get("bbox"),
-            "html": res.get("html"),
-            "cell_bbox": res.get("cell_bbox"),  # list of per-cell pixel boxes (order matches the html grid)
-        })
-
-    return {
-        "page_width": w,
-        "page_height": h,
-        "elapsed_ms": elapsed_ms,
-        "table_count": len(tables),
-        "tables": tables,
-        "raw_debug": _jsonable(result),  # STEP ①: the real shape, removed once the mapper is locked
-    }
 
 
 @app.post("/ocr")
@@ -117,18 +78,34 @@ async def ocr(file: UploadFile = File(...)):
     img = _to_bgr(data)
     h, w = img.shape[:2]
     t0 = time.perf_counter()
-    result = _ocr_engine().ocr(img, cls=True)
+    output = list(_ocr_engine().predict(img))  # PaddleOCR.predict (v5; .ocr() is legacy)
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
 
+    # v5: result carries parallel rec_texts / rec_scores / rec_boxes (axis-aligned PIXEL [x1,y1,x2,y2]).
     words = []
-    for line in (result[0] if result and result[0] else []):
-        box, (text, conf) = line[0], line[1]
-        xs = [p[0] for p in box]
-        ys = [p[1] for p in box]
-        words.append({
-            "text": text,
-            "bbox": [min(xs), min(ys), max(xs), max(ys)],  # pixel x1,y1,x2,y2
-            "conf": float(conf),
-        })
+    for res in output:
+        doc = _unwrap(res)
+        texts = doc.get("rec_texts") or []
+        scores = doc.get("rec_scores") or []
+        boxes = doc.get("rec_boxes")
+        if boxes is None or len(boxes) == 0:
+            boxes = doc.get("rec_polys") or []
+        for i, text in enumerate(texts):
+            box = boxes[i] if i < len(boxes) else None
+            if box is None:
+                continue
+            pts = np.asarray(box, dtype=float).reshape(-1)
+            if pts.size == 4:                       # rec_boxes: [x1,y1,x2,y2]
+                x1, y1, x2, y2 = pts.tolist()
+            elif pts.size >= 8:                     # rec_polys: 4 points -> bound
+                xs, ys = pts[0::2], pts[1::2]
+                x1, y1, x2, y2 = float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())
+            else:
+                continue
+            words.append({
+                "text": text,
+                "bbox": [x1, y1, x2, y2],
+                "conf": float(scores[i]) if i < len(scores) else 0.0,
+            })
 
     return {"page_width": w, "page_height": h, "elapsed_ms": elapsed_ms, "word_count": len(words), "words": words}

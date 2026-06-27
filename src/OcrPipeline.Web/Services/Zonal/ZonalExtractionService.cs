@@ -403,20 +403,16 @@ public sealed class ZonalExtractionService(
         return hint == "TEXT" ? (6, null) : ZoneHint.Resolve(hint, null);
     }
 
-    /// <summary>Crop a region, upscale toward MinOcrWidth (Lanczos), and read it with a tight PSM.</summary>
+    /// <summary>Crop a region at NATIVE resolution and read it with a tight PSM. Crop upscaling is now
+    /// engine-owned (Tesseract enlarges toward MinOcrWidth; PaddleOCR wants native), so we hand over the
+    /// unscaled crop and let the region engine apply the preprocessing it actually wants.</summary>
     private async Task<(string Raw, decimal Conf)> CropAndReadAsync(
         Image<L8> page, PixelRect rect, int psm, string? whitelist, string? languages, CancellationToken ct)
     {
-        var (tw, th) = ImagePreprocessor.ComputeTargetSize(
-            rect.Width, rect.Height, currentDpi: 0, targetDpi: _o.Dpi,
-            minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
-
         string crop = Path.Combine(Path.GetTempPath(), $"docuflow_zone_{Guid.NewGuid():N}.png");
         try
         {
-            using (var img = page.Clone(c => c
-                .Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
-                .Resize(tw, th, KnownResamplers.Lanczos3)))
+            using (var img = page.Clone(c => c.Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))))
             {
                 img.SaveAsPng(crop);
             }
@@ -428,21 +424,18 @@ public sealed class ZonalExtractionService(
         }
     }
 
-    /// <summary>OCR a whole table zone for word boxes (block PSM) and compute its horizontal ink profile.</summary>
+    /// <summary>OCR a whole table zone for word boxes (block PSM) at NATIVE resolution and compute its
+    /// horizontal ink profile from the same native crop. The profile is consumed in NORMALIZED y by
+    /// <see cref="TableRowSegmenter"/>, so its pixel resolution does not affect row boundaries; crop
+    /// upscaling for OCR is engine-owned (Tesseract enlarges; PaddleOCR wants native).</summary>
     private async Task<(IReadOnlyList<RegionWord> Words, int[] Profile)> ReadZoneWordsAndProfileAsync(
         Image<L8> page, PixelRect rect, string? languages, CancellationToken ct)
     {
-        var (tw, th) = ImagePreprocessor.ComputeTargetSize(
-            rect.Width, rect.Height, currentDpi: 0, targetDpi: _o.Dpi,
-            minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
-
         string crop = Path.Combine(Path.GetTempPath(), $"docuflow_ztab_{Guid.NewGuid():N}.png");
         int[] profile;
         try
         {
-            using (var img = page.Clone(c => c
-                .Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
-                .Resize(tw, th, KnownResamplers.Lanczos3)))
+            using (var img = page.Clone(c => c.Crop(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))))
             {
                 img.SaveAsPng(crop);
                 var px = new L8[img.Width * img.Height];
