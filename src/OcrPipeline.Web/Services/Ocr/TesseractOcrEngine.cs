@@ -2,6 +2,9 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using OcrPipeline.Web.Domain;
 using OcrPipeline.Web.Services.Normalization;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using Tesseract;
 
 namespace OcrPipeline.Web.Services.Ocr;
@@ -26,9 +29,10 @@ public sealed class TesseractOcrEngine(
     public string Name => "Tesseract";
 
     /// <summary>
-    /// Zonal OCR: read one already-cropped region with a tight PageSegMode and optional character
-    /// whitelist. No preprocessing/layout analysis here — the caller has cropped (and upscaled) the
-    /// zone; the human supplied the layout. Reuses the effective-language fallback + tessdata check.
+    /// Zonal OCR: read one cropped region with a tight PageSegMode and optional character whitelist. The
+    /// caller hands over a NATIVE-resolution crop; this engine UPSCALES it toward MinOcrWidth (Lanczos3)
+    /// because the LSTM classifier reads small glyphs better when enlarged. (PaddleOCR wants native crops
+    /// instead, so each region engine owns its own crop preprocessing — see <see cref="UpscaleCropForOcr"/>.)
     /// </summary>
     public Task<(string Text, decimal Confidence)> OcrRegionAsync(
         string imagePath, int psm, string? whitelist, string? languages, CancellationToken ct = default)
@@ -36,16 +40,24 @@ public sealed class TesseractOcrEngine(
         string langs = string.IsNullOrWhiteSpace(languages) ? _o.Languages : languages.Trim();
         string tessdata = ResolveTessdataOrThrow(langs);
 
-        using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
-        if (!string.IsNullOrEmpty(whitelist))
-            engine.SetVariable("tessedit_char_whitelist", whitelist);
+        var (prepared, isTemp) = UpscaleCropForOcr(imagePath);
+        try
+        {
+            using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
+            if (!string.IsNullOrEmpty(whitelist))
+                engine.SetVariable("tessedit_char_whitelist", whitelist);
 
-        using var pix = Pix.LoadFromFile(imagePath);
-        using var page = engine.Process(pix, (PageSegMode)psm);
+            using var pix = Pix.LoadFromFile(prepared);
+            using var page = engine.Process(pix, (PageSegMode)psm);
 
-        string text = (page.GetText() ?? "").Trim();
-        decimal conf = (decimal)(page.GetMeanConfidence()); // 0..1
-        return Task.FromResult((text, conf));
+            string text = (page.GetText() ?? "").Trim();
+            decimal conf = (decimal)(page.GetMeanConfidence()); // 0..1
+            return Task.FromResult((text, conf));
+        }
+        finally
+        {
+            if (isTemp && File.Exists(prepared)) File.Delete(prepared);
+        }
     }
 
     /// <summary>
@@ -59,31 +71,58 @@ public sealed class TesseractOcrEngine(
         string langs = string.IsNullOrWhiteSpace(languages) ? _o.Languages : languages.Trim();
         string tessdata = ResolveTessdataOrThrow(langs);
 
-        using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
-        if (!string.IsNullOrEmpty(whitelist))
-            engine.SetVariable("tessedit_char_whitelist", whitelist);
-
-        using var pix = Pix.LoadFromFile(imagePath);
-        using var page = engine.Process(pix, (PageSegMode)psm);
-
-        float imgW = pix.Width, imgH = pix.Height;
-        var words = new List<RegionWord>();
-        using var iter = page.GetIterator();
-        iter.Begin();
-        do
+        var (prepared, isTemp) = UpscaleCropForOcr(imagePath);
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            if (imgW > 0 && imgH > 0 && iter.TryGetBoundingBox(PageIteratorLevel.Word, out Rect wr))
+            using var engine = new TesseractEngine(tessdata, langs, EngineMode.LstmOnly);
+            if (!string.IsNullOrEmpty(whitelist))
+                engine.SetVariable("tessedit_char_whitelist", whitelist);
+
+            using var pix = Pix.LoadFromFile(prepared);
+            using var page = engine.Process(pix, (PageSegMode)psm);
+
+            float imgW = pix.Width, imgH = pix.Height;
+            var words = new List<RegionWord>();
+            using var iter = page.GetIterator();
+            iter.Begin();
+            do
             {
-                string word = (iter.GetText(PageIteratorLevel.Word) ?? "").Trim();
-                if (word.Length > 0)
-                    words.Add(new RegionWord(word,
-                        wr.X1 / imgW, wr.Y1 / imgH, wr.Width / imgW, wr.Height / imgH,
-                        (decimal)(iter.GetConfidence(PageIteratorLevel.Word) / 100f)));
+                ct.ThrowIfCancellationRequested();
+                if (imgW > 0 && imgH > 0 && iter.TryGetBoundingBox(PageIteratorLevel.Word, out Rect wr))
+                {
+                    string word = (iter.GetText(PageIteratorLevel.Word) ?? "").Trim();
+                    if (word.Length > 0)
+                        words.Add(new RegionWord(word,
+                            wr.X1 / imgW, wr.Y1 / imgH, wr.Width / imgW, wr.Height / imgH,
+                            (decimal)(iter.GetConfidence(PageIteratorLevel.Word) / 100f)));
+                }
             }
+            while (iter.Next(PageIteratorLevel.Word));
+            return Task.FromResult<IReadOnlyList<RegionWord>>(words);
         }
-        while (iter.Next(PageIteratorLevel.Word));
-        return Task.FromResult<IReadOnlyList<RegionWord>>(words);
+        finally
+        {
+            if (isTemp && File.Exists(prepared)) File.Delete(prepared);
+        }
+    }
+
+    /// <summary>
+    /// Upscale a NATIVE zone crop toward MinOcrWidth (Lanczos3) — the same enlargement the zonal caller
+    /// used to apply, now owned by the engine that wants it. Returns the original path (no temp) when the
+    /// crop already meets the target. Matches the prior pipeline exactly: Lanczos3 on the L8 crop.
+    /// </summary>
+    private (string Path, bool IsTemp) UpscaleCropForOcr(string imagePath)
+    {
+        using var img = Image.Load<L8>(imagePath);
+        var (tw, th) = ImagePreprocessor.ComputeTargetSize(
+            img.Width, img.Height, currentDpi: 0, targetDpi: _o.Dpi,
+            minOcrWidth: _o.MinOcrWidth, maxDimension: ImagePreprocessor.MaxUpscaleDimension);
+        if (tw == img.Width && th == img.Height) return (imagePath, false);
+
+        img.Mutate(c => c.Resize(tw, th, KnownResamplers.Lanczos3));
+        string temp = Path.Combine(Path.GetTempPath(), $"docuflow_tessup_{Guid.NewGuid():N}.png");
+        img.SaveAsPng(temp);
+        return (temp, true);
     }
 
     public Task<OcrExtraction> ExtractAsync(string filePath, string contentType, string? languages = null, CancellationToken ct = default)

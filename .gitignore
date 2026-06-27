@@ -8,6 +8,9 @@
 # Runtime / uploaded files
 src/OcrPipeline.Web/App_Data/uploads/
 
+# Per-page PNG previews rendered next to sample PDFs (derived artifacts; regenerated on demand)
+samples/*.page-*.png
+
 # Tesseract language models (~22MB each) — install locally, never commit. See README.
 tessdata/
 

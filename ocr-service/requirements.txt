@@ -1,19 +1,17 @@
-# Runtime deps LAYERED ON the official `paddlepaddle/paddle:2.6.2` base (see Dockerfile). That base
-# already ships a WORKING paddle 2.6.2 with a matched glibc/MKL/protobuf toolchain — the plain pip
-# `paddlepaddle==2.6.2` wheel on `python:3.10-slim` segfaults (`free(): invalid pointer`) the moment
-# paddle runs an op, so we do NOT pip-install paddlepaddle here; it comes from the base image.
+# Runtime deps LAYERED ON the official `paddlepaddle/paddle:3.0.0` base (see Dockerfile). That base ships
+# a WORKING paddle 3.0.0 with a matched glibc/MKL/protobuf toolchain — the plain pip `paddlepaddle` wheel
+# on a slim base segfaults the moment paddle runs an op, so we do NOT pip-install paddlepaddle here.
 #
-# PP-Structure (table recognition) lives in paddleocr 2.7.x via the PPStructure(table=True) API, which
-# returns table HTML + per-cell pixel bboxes — the shape STEP ① validates.
-#
-# Two hard pins keep the install sane (an unconstrained `pip install paddleocr` breaks both):
-#   numpy < 2                       paddle 2.6.2 is NOT numpy-2 ready; transitive deps otherwise pull 2.x
-#   exactly ONE opencv (contrib)    opencv-python / -headless overlap and clobber cv2 -> AttributeError;
-#                                   opencv-contrib-python is a superset providing full cv2. The Dockerfile
-#                                   purges any other opencv pip drags in and reinstalls just this one.
-paddleocr==2.7.3
-numpy==1.26.4
-opencv-contrib-python==4.6.0.66
+# UPGRADED 2.7.3 -> 3.x for PP-OCRv5 (real Thai recognition, proven). OCR-ONLY branch: we serve /ocr via
+# PaddleOCR.predict only; the PP-Structure table path is NOT shipped here (it stays parked).
+#   paddleocr 3.x        PP-OCRv5 engine; .predict() API
+#   paddlex[ocr]         kept from the PROVEN pin (lowest build risk). paddleocr 3.x depends on paddlex
+#                        regardless; the [ocr] extra installs CODE, not models, so with no PPStructureV3
+#                        warm-up nothing extra is downloaded and the image stays lean.
+# The old 2.6.2-era pins (numpy<2, single opencv-contrib) are GONE: paddle 3.x is numpy-2 ready and the
+# 3.x install resolves opencv cleanly (verified — PaddleOCR runs without the normalize step).
+paddleocr>=3.0,<4
+paddlex[ocr]==3.7.2
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
 python-multipart==0.0.9
