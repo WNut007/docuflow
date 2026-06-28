@@ -81,6 +81,53 @@ public sealed class MichelinOffsetCheck
         Assert.True(fails.Count == 0, "\n" + sb);
     }
 
+    /// <summary>
+    /// Regression for the live bug: template 12 is role-tagged FIRST, so the app runs ProcessMultiPageAsync,
+    /// which rebuilds each column via MultiPageColumns.Resolve — that path dropped LineOffset (copied the
+    /// LineSelect* fields but not LineOffset) -> offset 0 -> the spec line sliced by the origin x-range =
+    /// spec fragments. The single-page Extract() harness above never hit Resolve, so it stayed green. This
+    /// exercises the SAME multi-page path the live app uses: origin must be "United States" or empty, never
+    /// a spec fragment.
+    /// </summary>
+    [Fact]
+    public async Task Michelin_multipage_path_applies_LineOffset()
+    {
+        string? sample = FindUp(Path.Combine("samples", "michelin-invoice.pdf"));
+        if (sample is null) return;
+        if (!await SidecarUp()) return;
+
+        var svc = BuildSvc();
+        var doc = new Document { DocumentId = 65, StoredPath = sample, ContentType = "application/pdf", OcrLanguages = "eng", PageCount = 4 };
+
+        var template = new MappingTemplate { TemplateId = 99, TargetModel = "Michelin", MappingMode = "ZONAL" };
+        template.Fields.Add(new MappingField
+        {
+            FieldId = 1, TargetProperty = "line_item", DataType = "STRING", SourceType = "TABLE_CELL",
+            MinConfidence = 0.30m, ZonePage = 1, ZonePageRole = "FIRST",     // FIRST role -> multi-page path
+            ZoneX = 0.03m, ZoneY = 0.45m, ZoneW = 0.95m, ZoneH = 0.51m
+        });
+        var columns = new Dictionary<int, List<MappingTableColumn>>
+        {
+            [1] = new()
+            {
+                Col("quantity", "STRING", 0.03m, 0.10m, anchor: true, sort: 0),
+                Col("origin",   "STRING", 0.17m, 0.45m, sort: 1, mode: "ANCHOR", offset: -1),
+            }
+        };
+
+        var outcome = await svc.ProcessMultiPageAsync(doc, template, new Dictionary<int, List<TransformerStep>>(), columns, default);
+        var rows = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+            outcome.Values.Single(v => v.TargetProperty == "line_item").NormalizedValue ?? "[]")!;
+        var origins = rows.Select(r => Cell(r, "origin").Replace("\n", " ").Trim()).ToList();
+
+        // LineOffset applied -> every origin is "United States" (a leader) or empty; NEVER a spec fragment.
+        bool anyUS = origins.Any(o => o.Contains("United States", StringComparison.OrdinalIgnoreCase));
+        bool clean = origins.All(o => o.Length == 0 || o.Contains("United States", StringComparison.OrdinalIgnoreCase));
+        Assert.True(anyUS && clean,
+            "Multi-page origin must be 'United States' or empty (LineOffset applied through MultiPageColumns.Resolve). Got:\n  "
+            + string.Join("\n  ", origins));
+    }
+
     private async Task<List<(string qty, string origin, string reference)>> Extract(
         ZonalExtractionService svc, Document doc, int page)
     {
