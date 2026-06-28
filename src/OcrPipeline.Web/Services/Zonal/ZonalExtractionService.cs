@@ -229,6 +229,39 @@ public sealed class ZonalExtractionService(
             foreach (var col in columns)
             {
                 ct.ThrowIfCancellationRequested();
+
+                // ANCHOR: take ONLY the words on the anchor (quantity) line's y-band — i.e. the spec
+                // row — and drop the metadata lines (Brand / Origin / Our Reference) wrapped into the same
+                // row band. Assembled straight from the whole-zone word boxes (no extra OCR). Per-column:
+                // guarded on the mode, so every other column/mode/template is byte-identical to before.
+                // KNOWN LIMIT: a spec wrapped onto a 2nd physical line would keep only the anchor-y line —
+                // not present on the Michelin layout this targets (every spec is a single v5 box there);
+                // multi-line specs are a part-2-style concern. See CellLineSelector for the other modes.
+                if (string.Equals(col.LineSelectMode, "ANCHOR", StringComparison.OrdinalIgnoreCase))
+                {
+                    var anchorWords = zoneWords.Where(w => w.XCenter >= axs && w.XCenter <= axe
+                        && w.YCenter >= bands[r].YStart && w.YCenter <= bands[r].YEnd).ToList();
+                    string anchorText = "";
+                    decimal anchorConf = 0m;
+                    if (anchorWords.Count > 0)
+                    {
+                        double aTop = anchorWords.Min(w => w.Y), aBot = anchorWords.Max(w => w.YBottom);
+                        var (cs, ce) = Range(col);
+                        var lineWords = zoneWords
+                            .Where(w => w.XCenter >= cs && w.XCenter <= ce && OnAnchorLine(w, aTop, aBot))
+                            .ToList();
+                        if (lineWords.Count > 0)
+                        {
+                            anchorText = CellLineSelector.Apply(
+                                GroupWordsToLines(lineWords), "ALL", null, col.LineJoinSeparator);
+                            anchorConf = Math.Round(lineWords.Average(w => w.Conf), 4);
+                        }
+                    }
+                    obj[col.TargetSubProperty] = mappingEngine.NormalizeTyped(col.DataType, anchorText, order);
+                    if (anchorText.Length > 0) confs.Add(anchorConf);
+                    continue;
+                }
+
                 var (raw, conf) = await readCell(r, col, bands[r]);
                 IReadOnlyList<string> cellLines = (raw ?? "").Replace("\r", "").Split('\n');
                 // (b) strip shipping/reference metadata absorbed into a text (description) cell — gated.
@@ -471,6 +504,17 @@ public sealed class ZonalExtractionService(
     }
 
     private static string JoinLine(List<WordBox> line) => string.Join(' ', line.OrderBy(w => w.X).Select(w => w.Text));
+
+    /// <summary>True when a word's vertical extent overlaps the anchor line's y-band by >= 40% of the
+    /// smaller height — the same overlap test the row segmenter uses to merge an anchor cluster. On the v5
+    /// boxes the spec overlaps the quantity ~0.9 (same line) while the nearest metadata line overlaps ~0
+    /// (it is a full line away), so this cleanly isolates the anchor (spec) line for ANCHOR columns.</summary>
+    private static bool OnAnchorLine(WordBox w, double anchorTop, double anchorBottom)
+    {
+        double overlap = Math.Min(anchorBottom, w.YBottom) - Math.Max(anchorTop, w.Y);
+        double minH = Math.Min(anchorBottom - anchorTop, w.H);
+        return minH > 0 && overlap / minH >= 0.40;
+    }
 
     private Image<L8> GetPreparedPage(Document doc, int pageNo, Dictionary<int, Image<L8>> cache, List<string> temps)
     {
