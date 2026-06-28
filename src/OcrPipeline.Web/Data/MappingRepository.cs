@@ -30,7 +30,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         const string sql = """
             SELECT c.ColumnId, c.FieldId, c.TargetSubProperty, c.DataType, c.TableHeader,
                    c.SortOrder, c.IsActive,
-                   c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
+                   c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator,
+                   c.LineOffset
             FROM dbo.MappingTableColumn c
             JOIN dbo.MappingField f ON f.FieldId = c.FieldId
             WHERE f.TemplateId = @TemplateId AND c.IsActive = 1
@@ -52,10 +53,10 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         const string insertSql = """
             INSERT dbo.MappingTableColumn
                 (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive,
-                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator)
+                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator, LineOffset)
             VALUES
                 (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive,
-                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator);
+                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator, @LineOffset);
             """;
         int order = 0;
         foreach (var c in columns)
@@ -68,7 +69,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
                 c.TableHeader,
                 SortOrder = c.SortOrder == 0 ? order : c.SortOrder,
                 c.IsActive,
-                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
+                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator,
+                c.LineOffset
             }, tx);
             order++;
         }
@@ -347,10 +349,10 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
         const string colInsert = """
             INSERT dbo.MappingTableColumn
                 (FieldId, TargetSubProperty, DataType, TableHeader, SortOrder, IsActive,
-                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator)
+                 ColXStart, ColXEnd, IsAnchor, LineSelectMode, LineSelectIndices, LineJoinSeparator, LineOffset)
             VALUES
                 (@FieldId, @TargetSubProperty, @DataType, @TableHeader, @SortOrder, @IsActive,
-                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator);
+                 @ColXStart, @ColXEnd, @IsAnchor, @LineSelectMode, @LineSelectIndices, @LineJoinSeparator, @LineOffset);
             """;
         int order = 0;
         foreach (var c in columns)
@@ -363,7 +365,8 @@ public sealed class MappingRepository(SqlConnectionFactory factory) : IMappingRe
                 c.TableHeader,
                 SortOrder = c.SortOrder == 0 ? order : c.SortOrder,
                 c.IsActive,
-                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator
+                c.ColXStart, c.ColXEnd, c.IsAnchor, c.LineSelectMode, c.LineSelectIndices, c.LineJoinSeparator,
+                c.LineOffset
             }, tx);
             order++;
         }

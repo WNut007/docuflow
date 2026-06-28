@@ -162,9 +162,16 @@ public sealed class MappingTableColumn
     public decimal? ColXStart { get; set; }
     public decimal? ColXEnd { get; set; }
     public bool IsAnchor { get; set; }
-    public string? LineSelectMode { get; set; }         // ALL/PICK/FIRST
+    public string? LineSelectMode { get; set; }         // ALL/PICK/FIRST/ANCHOR
     public string? LineSelectIndices { get; set; }      // e.g. "0,2"
     public string? LineJoinSeparator { get; set; }      // e.g. " "
+
+    // ANCHOR mode only: signed line offset from the anchor (quantity) line. null/0 = the anchor line
+    // itself (part-1 behavior). -N = the Nth distinct line ABOVE the anchor, +N = Nth line BELOW.
+    // Reads only its side; the other side / past-end / crossing the adjacent anchor / a follower row all
+    // return EMPTY (never a wrong-but-valid value). For metadata at a non-constant per-page offset
+    // (e.g. our_reference on a split layout) use label-anchored extraction instead.
+    public int? LineOffset { get; set; }
 }
 
 /// <summary>Engine output container — what an OCR provider returns.</summary>
