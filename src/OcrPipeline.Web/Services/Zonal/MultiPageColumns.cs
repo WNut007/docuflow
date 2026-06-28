@@ -4,8 +4,9 @@ namespace OcrPipeline.Web.Services.Zonal;
 
 /// <summary>
 /// PURE column resolution for a multi-page line_item table (Phase 3). The FIRST (canonical) region is
-/// authoritative for column STRUCTURE — TargetSubProperty, DataType, IsAnchor, TableHeader and the
-/// LineSelect* rules — while each page's region keeps its own x-GEOMETRY (ColXStart/ColXEnd), since
+/// authoritative for column STRUCTURE — TargetSubProperty, DataType, IsAnchor, TableHeader, the
+/// LineSelect* rules AND LineOffset — while each page's region keeps its own x-GEOMETRY (ColXStart/ColXEnd),
+/// since
 /// the table band legitimately differs per page. This makes the concatenated output immune to column
 /// "drift" if a sibling region's structure was edited (or hand-edited in the DB) after a copy.
 ///
@@ -35,7 +36,7 @@ public static class MultiPageColumns
                 TargetSubProperty = s.TargetSubProperty, DataType = s.DataType, IsAnchor = s.IsAnchor,
                 TableHeader = s.TableHeader, SortOrder = s.SortOrder,
                 LineSelectMode = s.LineSelectMode, LineSelectIndices = s.LineSelectIndices,
-                LineJoinSeparator = s.LineJoinSeparator,
+                LineJoinSeparator = s.LineJoinSeparator, LineOffset = s.LineOffset,   // canonical STRUCTURE — must be copied
                 ColXStart = g.ColXStart, ColXEnd = g.ColXEnd,
             });
         }

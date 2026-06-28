@@ -223,6 +223,11 @@ public sealed class ZonalExtractionService(
 
         var rows = new List<Dictionary<string, object?>>(bands.Count);
         var confs = new List<decimal>();
+        // Per-page median word height — the unit for the follower-gap threshold (tracks page scale, so
+        // it is not a global magic number). Approx median (middle element of the sorted heights).
+        double medianLineH = zoneWords.Count > 0
+            ? zoneWords.Select(w => w.H).OrderBy(h => h).ElementAt(zoneWords.Count / 2)
+            : 0.0;
         for (int r = 0; r < bands.Count; r++)
         {
             var obj = new Dictionary<string, object?>();
@@ -230,35 +235,21 @@ public sealed class ZonalExtractionService(
             {
                 ct.ThrowIfCancellationRequested();
 
-                // ANCHOR: take ONLY the words on the anchor (quantity) line's y-band — i.e. the spec
-                // row — and drop the metadata lines (Brand / Origin / Our Reference) wrapped into the same
-                // row band. Assembled straight from the whole-zone word boxes (no extra OCR). Per-column:
-                // guarded on the mode, so every other column/mode/template is byte-identical to before.
-                // KNOWN LIMIT: a spec wrapped onto a 2nd physical line would keep only the anchor-y line —
-                // not present on the Michelin layout this targets (every spec is a single v5 box there);
-                // multi-line specs are a part-2-style concern. See CellLineSelector for the other modes.
+                // ANCHOR: read relative to the anchor (quantity) line. LineOffset null/0 = the anchor/spec
+                // line itself (part-1 behavior); -N / +N = the Nth distinct line ABOVE / BELOW the anchor,
+                // with the symmetric safety rules (past-end / crossing the adjacent anchor / a follower row
+                // -> EMPTY, never a wrong-but-valid value). Assembled from the whole-zone word boxes (no
+                // extra OCR). Per-column + guarded on the mode, so every other column/mode/template is
+                // byte-identical to before. KNOWN LIMITS: a spec wrapped onto a 2nd physical line keeps only
+                // the anchor-y line; and a field whose offset varies per page (e.g. our_reference on a split
+                // layout) is correct-or-empty here -> use label-anchored extraction for full coverage.
                 if (string.Equals(col.LineSelectMode, "ANCHOR", StringComparison.OrdinalIgnoreCase))
                 {
-                    var anchorWords = zoneWords.Where(w => w.XCenter >= axs && w.XCenter <= axe
-                        && w.YCenter >= bands[r].YStart && w.YCenter <= bands[r].YEnd).ToList();
-                    string anchorText = "";
-                    decimal anchorConf = 0m;
-                    if (anchorWords.Count > 0)
-                    {
-                        double aTop = anchorWords.Min(w => w.Y), aBot = anchorWords.Max(w => w.YBottom);
-                        var (cs, ce) = Range(col);
-                        var lineWords = zoneWords
-                            .Where(w => w.XCenter >= cs && w.XCenter <= ce && OnAnchorLine(w, aTop, aBot))
-                            .ToList();
-                        if (lineWords.Count > 0)
-                        {
-                            anchorText = CellLineSelector.Apply(
-                                GroupWordsToLines(lineWords), "ALL", null, col.LineJoinSeparator);
-                            anchorConf = Math.Round(lineWords.Average(w => w.Conf), 4);
-                        }
-                    }
-                    obj[col.TargetSubProperty] = mappingEngine.NormalizeTyped(col.DataType, anchorText, order);
-                    if (anchorText.Length > 0) confs.Add(anchorConf);
+                    var (cs, ce) = Range(col);
+                    var (aText, aConf) = AnchorCell(zoneWords, bands, r, axs, axe, cs, ce,
+                        col.LineOffset ?? 0, medianLineH, col.LineJoinSeparator);
+                    obj[col.TargetSubProperty] = mappingEngine.NormalizeTyped(col.DataType, aText, order);
+                    if (aText.Length > 0) confs.Add(aConf);
                     continue;
                 }
 
@@ -486,22 +477,25 @@ public sealed class ZonalExtractionService(
         }
     }
 
-    /// <summary>Group word boxes into reading-order text lines (a new line starts when a word clears the
-    /// current line's bottom); each line's words are joined left-to-right by a space. Cell-read fallback.</summary>
-    private static List<string> GroupWordsToLines(List<WordBox> words)
+    /// <summary>Group word boxes into reading-order lines of WORDS, top-to-bottom (a new line starts when a
+    /// word clears the current line's bottom). <see cref="GroupWordsToLines"/> joins each to a string.</summary>
+    private static List<List<WordBox>> GroupWordsIntoLines(IEnumerable<WordBox> words)
     {
-        var lines = new List<string>();
+        var lines = new List<List<WordBox>>();
         var current = new List<WordBox>();
         double bottom = double.NegativeInfinity;
         foreach (var w in words.OrderBy(w => w.YCenter))
         {
-            if (current.Count > 0 && w.Y > bottom) { lines.Add(JoinLine(current)); current.Clear(); }
+            if (current.Count > 0 && w.Y > bottom) { lines.Add(current); current = new(); }
             current.Add(w);
             bottom = current.Count == 1 ? w.YBottom : Math.Max(bottom, w.YBottom);
         }
-        if (current.Count > 0) lines.Add(JoinLine(current));
+        if (current.Count > 0) lines.Add(current);
         return lines;
     }
+
+    private static List<string> GroupWordsToLines(List<WordBox> words)
+        => GroupWordsIntoLines(words).Select(JoinLine).ToList();
 
     private static string JoinLine(List<WordBox> line) => string.Join(' ', line.OrderBy(w => w.X).Select(w => w.Text));
 
@@ -515,6 +509,81 @@ public sealed class ZonalExtractionService(
         double minH = Math.Min(anchorBottom - anchorTop, w.H);
         return minH > 0 && overlap / minH >= 0.40;
     }
+
+    /// <summary>The anchor (quantity) cluster's vertical extent for a band: (top, bottom, center), or null
+    /// when the band has no anchor word. Locates the item's anchor line and its neighbours.</summary>
+    private static (double Top, double Bottom, double Center)? AnchorCluster(
+        IReadOnlyList<WordBox> zoneWords, RowBand band, double axs, double axe)
+    {
+        var aw = zoneWords.Where(w => w.XCenter >= axs && w.XCenter <= axe
+            && w.YCenter >= band.YStart && w.YCenter <= band.YEnd).ToList();
+        if (aw.Count == 0) return null;
+        double t = aw.Min(w => w.Y), b = aw.Max(w => w.YBottom);
+        return (t, b, (t + b) / 2.0);
+    }
+
+    // Follower threshold: a row whose anchor sits within this many median line-heights of the PREVIOUS
+    // anchor has no metadata block above it -> it is a grouped "follower" and any offset returns EMPTY.
+    // Measured on the v5 Michelin boxes: followers ~1.4 line-heights from the previous anchor, leaders ~8.5
+    // (a 5-line block between) — the clusters are 5.8x apart, so K=3 sits squarely in the empty band.
+    private const double FollowerGapLineHeights = 3.0;
+
+    /// <summary>Read an ANCHOR column's cell relative to the anchor (quantity) line, honoring the signed
+    /// <paramref name="offset"/> and the symmetric safety rules. Returns EMPTY (never a wrong-but-valid
+    /// value) when: there is no anchor; the row is a grouped follower (offset != 0); the offset runs past
+    /// the lines available on that side (rule 2); or that side is empty. Rule 3 (don't cross the adjacent
+    /// anchor) is enforced by BOUNDING the enumerated lines to the inter-anchor gap on the offset's side.</summary>
+    private static (string Text, decimal Conf) AnchorCell(
+        IReadOnlyList<WordBox> zoneWords, IReadOnlyList<RowBand> bands, int r,
+        double axs, double axe, double cs, double ce, int offset, double medianLineH, string? joinSep)
+    {
+        if (AnchorCluster(zoneWords, bands[r], axs, axe) is not { } self) return ("", 0m);
+        var (aTop, aBot, aCenter) = self;
+
+        // offset 0 -> the anchor line itself (part-1 behavior): words on the anchor's y-band, this column's x.
+        if (offset == 0)
+            return Emit(zoneWords.Where(w => w.XCenter >= cs && w.XCenter <= ce && OnAnchorLine(w, aTop, aBot)).ToList(), joinSep);
+
+        var prev = r > 0 ? AnchorCluster(zoneWords, bands[r - 1], axs, axe) : null;
+
+        // Rule 4: a grouped follower (anchor within K line-heights of the previous anchor) has no own
+        // metadata block -> EMPTY for any offset.
+        if (prev is { } p4 && medianLineH > 0 && (aCenter - p4.Center) < FollowerGapLineHeights * medianLineH)
+            return ("", 0m);
+
+        // Rule 5 (own-half bound) — a SAFETY INVARIANT, do not weaken. Enumerate only the lines in THIS
+        // item's half of the inter-anchor gap: those closer to this anchor than to the neighbour (the
+        // midpoint of the two anchor centers). On a SPLIT layout the gap also holds the NEIGHBOUR's metadata,
+        // so without this bound a large offset silently reads the neighbour's value. Concrete bug it closes
+        // (Michelin page 2): our_reference=-5 on item 99 returned "15821324" — that is item 57's reference,
+        // which sits BELOW 57, inside 99's above-gap. Rules 2/3/4 missed it (rule 3 only guards crossing the
+        // anchor, and the wrong value is inside the gap). Bounding to the own half makes such an offset run
+        // off the end -> EMPTY, never a valid-looking wrong value. (This also subsumes rule 3.)
+        List<List<WordBox>> sideLines;
+        int idx;
+        if (offset < 0)   // ABOVE: own half = (midpoint(prev, this) .. this anchor top)
+        {
+            double lo = prev is { } p ? (p.Center + aCenter) / 2.0 : 0.0;
+            sideLines = GroupWordsIntoLines(zoneWords.Where(w => w.YCenter < aTop && w.YCenter > lo));
+            idx = sideLines.Count + offset;                 // offset<0: -1 -> last line (closest above)
+        }
+        else              // BELOW: own half = (this anchor bottom .. midpoint(this, next))
+        {
+            var next = r < bands.Count - 1 ? AnchorCluster(zoneWords, bands[r + 1], axs, axe) : null;
+            double hi = next is { } n ? (aCenter + n.Center) / 2.0 : 1.0;
+            sideLines = GroupWordsIntoLines(zoneWords.Where(w => w.YCenter > aBot && w.YCenter < hi));
+            idx = offset - 1;                               // +1 -> first line below
+        }
+
+        if (idx < 0 || idx >= sideLines.Count) return ("", 0m);   // Rule 2: past the lines on that side
+        return Emit(sideLines[idx].Where(w => w.XCenter >= cs && w.XCenter <= ce).ToList(), joinSep);
+    }
+
+    /// <summary>Join a cell's words to text + mean confidence; empty cell -> ("", 0).</summary>
+    private static (string Text, decimal Conf) Emit(List<WordBox> cell, string? joinSep)
+        => cell.Count == 0
+            ? ("", 0m)
+            : (CellLineSelector.Apply(GroupWordsToLines(cell), "ALL", null, joinSep), Math.Round(cell.Average(w => w.Conf), 4));
 
     private Image<L8> GetPreparedPage(Document doc, int pageNo, Dictionary<int, Image<L8>> cache, List<string> temps)
     {
