@@ -110,22 +110,48 @@ public sealed class MichelinOffsetCheck
         {
             [1] = new()
             {
-                Col("quantity", "STRING", 0.03m, 0.10m, anchor: true, sort: 0),
-                Col("origin",   "STRING", 0.17m, 0.45m, sort: 1, mode: "ANCHOR", offset: -1),
+                Col("quantity",    "STRING", 0.03m, 0.10m, anchor: true, sort: 0),
+                Col("origin",      "STRING", 0.17m, 0.45m, sort: 1, mode: "ANCHOR", offset: -1),
+                Col("articlecode", "STRING", 0.60m, 0.72m, sort: 2),     // for row identification in the dump
             }
         };
 
         var outcome = await svc.ProcessMultiPageAsync(doc, template, new Dictionary<int, List<TransformerStep>>(), columns, default);
         var rows = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
             outcome.Values.Single(v => v.TargetProperty == "line_item").NormalizedValue ?? "[]")!;
-        var origins = rows.Select(r => Cell(r, "origin").Replace("\n", " ").Trim()).ToList();
+        var got = rows.Select(r => (qty: Cell(r, "quantity"), art: Cell(r, "articlecode"),
+                                    origin: Cell(r, "origin").Replace("\n", " ").Trim())).ToList();
 
-        // LineOffset applied -> every origin is "United States" (a leader) or empty; NEVER a spec fragment.
-        bool anyUS = origins.Any(o => o.Contains("United States", StringComparison.OrdinalIgnoreCase));
-        bool clean = origins.All(o => o.Length == 0 || o.Contains("United States", StringComparison.OrdinalIgnoreCase));
-        Assert.True(anyUS && clean,
-            "Multi-page origin must be 'United States' or empty (LineOffset applied through MultiPageColumns.Resolve). Got:\n  "
-            + string.Join("\n  ", origins));
+        // EXACT per-row expected origin, in multi-page concatenated order (p1, p2, p3, p4-totals).
+        // "US" = the leader's own group origin (United States); "" = a follower (or no metadata above) -> empty.
+        // A future regression where a FOLLOWER starts leaking "United States" fails this (not the loose check).
+        string[] expect =
+        {
+            "US","US","US",                 // p1: 6,14,9          (all leaders)
+            "US","US","US","","","US",      // p2: 57,99,2,31,6,7  (2 is a LEADER; 31,6 followers)
+            "US","","US","","US",           // p3: 11,14,1,1,12    (14, second-1 followers)
+            "",                             // p4: 270 totals row  (no metadata above -> empty)
+        };
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Multi-page (ProcessMultiPageAsync) per-row origin — exact assertion");
+        sb.AppendLine(new string('-', 70));
+        var fails = new List<string>();
+        for (int i = 0; i < got.Count || i < expect.Length; i++)
+        {
+            string origin = i < got.Count ? got[i].origin : "<missing row>";
+            string e = i < expect.Length ? expect[i] : "<extra row>";
+            bool ok = e == "US" ? origin.Contains("United States", StringComparison.OrdinalIgnoreCase)
+                                : (e == "" && i < got.Count ? origin.Length == 0 : false);
+            if (!ok) fails.Add($"row{i}: origin='{origin}' expected {(e == "US" ? "United States" : e == "" ? "(empty)" : e)}");
+            sb.AppendLine($"  row{i,-2} qty={(i<got.Count?got[i].qty:"-"),-4} art={(i<got.Count?got[i].art:"-"),-14} origin=[{Trunc(origin,24),-24}] exp={e,-3} {(ok ? "ok" : "FAIL")}");
+        }
+        string outDir = Environment.GetEnvironmentVariable("DOCRT_OUT") ?? Path.Combine(Path.GetTempPath(), "docrt_measure");
+        Directory.CreateDirectory(outDir);
+        File.WriteAllText(Path.Combine(outDir, "michelin_multipage.txt"), sb.ToString());
+
+        Assert.True(got.Count == expect.Length && fails.Count == 0,
+            $"\n{sb}\nrows={got.Count} expected={expect.Length}\n" + string.Join("\n", fails));
     }
 
     private async Task<List<(string qty, string origin, string reference)>> Extract(
