@@ -33,7 +33,7 @@ def build_engine():
         text_recognition_model_name=REC_MODEL,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
-        use_textline_orientation=True,
+        use_textline_orientation=False,  # mirror app.py: avoid false 180-deg flips on small crops
     )
 
 

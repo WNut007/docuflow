@@ -49,7 +49,12 @@ def _ocr_engine():
             text_recognition_model_name="th_PP-OCRv5_mobile_rec",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
-            use_textline_orientation=True,
+            # OFF: the per-textline 180-deg orientation classifier FALSE-FLIPS upright text on small
+            # zone crops — garbling whole rows (a tire spec read upside-down) and, worse, SILENTLY
+            # flipping single quantity digits (9<->6, so "99"->"66" passes as a valid qty). Every DocuFlow
+            # input is a digitally-generated, upright invoice (Thai + Latin), so there is no genuinely
+            # rotated text to correct; disabling removes the false-flips with nothing to lose.
+            use_textline_orientation=False,
         )
     return _ocr
 
