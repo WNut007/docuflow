@@ -8,6 +8,10 @@ namespace OcrPipeline.Web.Services.Zonal;
 ///   PICK  - the lines at <c>indices</c> (0-based, e.g. "0,2"), joined with the separator
 /// Unknown/blank mode defaults to ALL. This is the LineSelectMode/LineSelectIndices/LineJoinSeparator
 /// triple stored on <see cref="Domain.MappingTableColumn"/>.
+///
+/// NOTE: the ANCHOR mode is resolved UPSTREAM in ZonalExtractionService.BuildTableRowsAsync (it
+/// needs each word's y to keep only the anchor/quantity line and drop wrapped metadata), so it never
+/// reaches here. The modes above operate on already-collapsed line strings (no y).
 /// </summary>
 public static class CellLineSelector
 {
