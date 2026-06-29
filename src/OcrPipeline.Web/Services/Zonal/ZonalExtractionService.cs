@@ -287,9 +287,38 @@ public sealed class ZonalExtractionService(
             rows.Add(obj);
         }
 
+        // Group-inheritance (mechanism 2a): a grouped FOLLOWER row (anchor within the rule-4 follower gap
+        // of the previous anchor) has no own metadata block, so for each GroupInherit column it inherits
+        // the most-recent LEADER's value when its OWN cell is EMPTY. Uses the SAME rule-4 classification the
+        // ANCHOR reader used, so the row that came out empty is exactly the row that inherits; a NEW leader
+        // resets the source (leaderRow), keeping groups separate (e.g. qty 99 cannot bleed into the qty-2
+        // group). Only fills an empty follower cell from a NON-empty leader -> correct-or-EMPTY, never wrong.
+        // EARLY-OUT no-op unless a column opts in -> templates without GroupInherit are byte-identical.
+        var inheritCols = columns.Where(c => c.GroupInherit).ToList();
+        if (inheritCols.Count > 0)
+        {
+            var anchorCenters = bands.Select(b => AnchorCluster(zoneWords, b, axs, axe)?.Center).ToList();
+            int leaderRow = -1;
+            for (int r = 0; r < bands.Count; r++)
+            {
+                bool isFollower = r > 0 && anchorCenters[r] is { } cur && anchorCenters[r - 1] is { } prv
+                                  && medianLineH > 0 && (cur - prv) < FollowerGapLineHeights * medianLineH;
+                if (!isFollower) { leaderRow = r; continue; }       // leader (or first row) -> the group source
+                if (leaderRow < 0) continue;
+                foreach (var col in inheritCols)
+                {
+                    string key = col.TargetSubProperty;
+                    if (IsEmptyCell(rows[r].GetValueOrDefault(key)) && !IsEmptyCell(rows[leaderRow].GetValueOrDefault(key)))
+                        rows[r][key] = rows[leaderRow][key];
+                }
+            }
+        }
+
         decimal? conf2 = confs.Count > 0 ? Math.Round(confs.Average(), 4) : null;
         return new TableResult(rows, conf2);
     }
+
+    private static bool IsEmptyCell(object? v) => v is null || (v is string s && s.Length == 0);
 
     /// <summary>Production path: render a working raster per page, deskew once, crop + OCR each zone.</summary>
     public async Task<MappingOutcome> ProcessAsync(

@@ -172,6 +172,12 @@ public sealed class MappingTableColumn
     // return EMPTY (never a wrong-but-valid value). For metadata at a non-constant per-page offset
     // (e.g. our_reference on a split layout) use label-anchored extraction instead.
     public int? LineOffset { get; set; }
+
+    // Group inheritance (mechanism 2a): when true, a grouped FOLLOWER row (stacked directly under a
+    // leader, sharing its metadata block) inherits the LEADER's value for this column if its own cell is
+    // EMPTY. Opt-in per column — for a leader-relative shared field (e.g. origin = LineOffset -1); leave
+    // false for per-item fields (e.g. description). Only fills empty cells from a non-empty leader.
+    public bool GroupInherit { get; set; }
 }
 
 /// <summary>Engine output container — what an OCR provider returns.</summary>
